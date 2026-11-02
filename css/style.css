@@ -176,6 +176,10 @@ textarea { width: 100%; min-height: 72px; background: #0a1413; color: var(--pape
 .row .actions { flex-direction: column; flex-wrap: nowrap; align-items: flex-end; min-width: 10.5rem; }
 .row .actions > * { white-space: nowrap; }
 .placeholder { visibility: hidden; }
+.inline { display: inline-flex; gap: 4px; align-items: center; flex-wrap: nowrap; }
+.count { min-width: 1.6em; text-align: center; }
+select { background: var(--lacquer-2); color: var(--paper); border: 1px solid var(--line); font: inherit; padding: 3px 6px; max-width: 60%; }
+select:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .slot-empty { opacity: .45; }
 /* The encounter floats over the page instead of pushing it down. */
 #encounter { position: fixed; z-index: 20; right: max(12px, env(safe-area-inset-right, 0px)); bottom: max(12px, env(safe-area-inset-bottom, 0px)); width: min(340px, calc(100vw - 24px)); }

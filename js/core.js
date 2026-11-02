@@ -93,8 +93,8 @@
   // ---------- state ----------
   function freshMeta() {
     return {
-      v: 3, clockPool: 3600, perfectSeen: {}, lore: {}, trophies: {}, maxDepth: {}, towerBest: 0, duelsWon: 0, fame: 0, ascensions: 0, daoMarks: 0, dao: {}, karma: 0, karmaUps: {}, feats: {}, best: 0, lastSeen: Date.now(),
-      settings: { autoStage: false, autoTech: false, autoMajor: false, autoMission: false, autoEquip: false, autoSkills: true, autoGuard: true },
+      v: 3, lastSect: null, idleArts: {}, bagLevel: 0, vault: [], vaultLevel: 0, pillTargets: { gather: 2, heal: 1, foundation: 1 }, clockPool: 3600, perfectSeen: {}, lore: {}, trophies: {}, maxDepth: {}, towerBest: 0, duelsWon: 0, fame: 0, ascensions: 0, daoMarks: 0, dao: {}, karma: 0, karmaUps: {}, feats: {}, best: 0, lastSeen: Date.now(),
+      settings: { autoStage: false, autoTech: false, autoMajor: false, autoMission: false, autoEquip: true, autoSkills: true, autoGuard: true, autoMeridian: false, autoRegion: false, autoBoss: false, autoPills: false, autoAbode: false, autoBeast: false, autoForge: false, autoFate: false, autoRebirth: false, autoSect: false, autoMajorArt: false, majorThreshold: 0.7, autoSellBelow: -1, salvageForCores: false },
       stats: { clicks: 0, kills: 0, pills: 0, lives: 1, tribs: 0, breakthroughs: 0, deviations: 0, bestRoot: 0, bestRarity: 0,
         bestRank: 0, supreme: 0, draws: 0, encounters: 0, deaths: 0, items: 0, playSeconds: 0, bestComprehension: 0, bestCondition: 0, bestPillGrade: 0, bestSite: 0, bestSkillRank: 0, bestBeastStage: 0, secludedSeconds: 0, parries: 0, defeats: 0, bestStreak: 0, bestPlus: 0 },
       log: [], fx: [],
@@ -110,7 +110,7 @@
       momentum: 0, streak: 0, guard: 0, cds: {}, miXp: 0, bossMeter: 0, doubleLoot: false, parryBonus: false,
       meridians: 0, abode: {}, eggs: 0, beast: null,
       cores: 0, techQ: {}, pillGrades: {}, meridianQ: [], abodeSite: 2, skillUse: {},
-      encounter: null, encounterIn: rand(30, 60), lastFortune: null,
+      encounter: null, encounterIn: rand(30, 60), encounterWait: 0, lastFortune: null, idleClock: 0,
       dead: false, ascendReady: false, itemSeq: S.itemSeq || 1, choosingRoot: true, rerolls: 0,
     };
   }
@@ -476,6 +476,23 @@
     return { maxHp, bolts, survived: hp > 0, total: count };
   }
 
+  // Survival odds for the next lightning, estimated by simulating it. Cached for a game second.
+  let tribMemo = { at: -1, S: null, p: 1 };
+  function tribSurvival() {
+    if (!isMajor(S.stage)) return 1;
+    const toAscend = S.stage >= maxStage();
+    const nextRealm = realmOf(S.stage + 1);
+    if (!toAscend && nextRealm < TRIB_FROM_REALM) return 1;
+    if (tribMemo.S === S && tribMemo.at === Math.floor(S.stats.playSeconds) && tribMemo.stage === S.stage) return tribMemo.p;
+    let ok = 0;
+    for (let i = 0; i < 200; i++) if (callTribulation(toAscend ? realmOf(S.stage) : nextRealm, toAscend ? 3 : 0).survived) ok++;
+    tribMemo = { at: Math.floor(S.stats.playSeconds), S, stage: S.stage, p: ok / 200 };
+    return tribMemo.p;
+  }
+  function rootImproveChance() {
+    const purity = S.root.purity === undefined ? 0.5 : S.root.purity;
+    return ladderOdds('root').reduce((p, o, i) => p + (i > S.root.tier ? o : i === S.root.tier ? o * (1 - purity) : 0), 0);
+  }
   function attemptBreakthrough() {
     if (!canAttempt()) return false;
     const cost = stageCost(S.stage);
@@ -617,14 +634,22 @@
       return;
     }
     const roll = rng();
-    const luck = Math.max(0, mods().luck);
-    const tier = roll < 0.015 + luck * 0.0003 ? 'champion' : roll < 0.1 + luck * 0.001 ? 'elite' : 'normal';
+    const odds = foeTierOdds();
+    const tier = roll < odds.champion ? 'champion' : roll < odds.champion + odds.elite ? 'elite' : 'normal';
     const scale = { normal: 1, elite: 3, champion: 7 }[tier];
     const prefix = { normal: '', elite: 'Elite ', champion: 'Champion ' }[tier];
     const affix = tier === 'normal' ? null : pick(D.FOE_AFFIXES);
     S.foe = makeFoe(`${affix ? `${affix.name} ` : ''}${prefix}${pick(D.REGIONS[i].foes)}`, tier, r.hp * scale * rand(0.85, 1.15) * (affix ? affix.hp : 1), r.dmg * (1 + (scale - 1) * 0.3) * rand(0.9, 1.1) * (affix ? affix.dmg : 1), tier !== 'normal');
     S.foe.pay = affix ? affix.pay : 1;
   }
+  function foeTierOdds() {
+    const luck = Math.max(0, mods().luck);
+    const champion = 0.015 + luck * 0.0003;
+    const elite = Math.max(0, 0.1 + luck * 0.001 - champion);
+    return { champion, elite, normal: Math.max(0, 1 - champion - elite) };
+  }
+  const dropChance = (tier, depth) => Math.min(1, TIER_REWARD[tier].drop * (1 + Math.max(0, mods().luck) * 0.01) * (1 + (depth || 0) * 0.1));
+  const herbChance = (tier) => TIER_REWARD[tier].herb;
   function makeFoe(name, tier, hp, dmg, charges) {
     return { name, tier, hp, maxHp: hp, dmg, stun: 0, charges, chargeIn: charges ? rand(5, 8) : 0, charging: 0 };
   }
@@ -780,7 +805,7 @@
     S.bossMeter = Math.min(BOSS_METER, S.bossMeter + (foe.tier === 'normal' ? 1 : 3));
     if (tw.fame) gainFame(tw.fame * (S.region + 1) * (S.depth + 1));
     if (rng() < tw.herb) S.herbs += Math.ceil(rand(1, 3) * (S.region + 1) * (1 + S.depth * 0.3) * m.herbs);
-    if (rng() < tw.drop * (1 + Math.max(0, m.luck) * 0.01) * (1 + S.depth * 0.1)) gainItem(S.region, null, 0, tw.shift + S.depth);
+    if (rng() < dropChance(foe.tier, S.depth)) gainItem(S.region, null, 0, tw.shift + S.depth);
     if (foe.tier === 'champion' && rng() < 0.1) gainEgg();
   }
   function bossGrade(i, d) { return Math.min(D.RARITIES.length - 1, Math.floor(i * 0.6 + d * 0.4) + 1); }
@@ -1015,11 +1040,13 @@
     const low = Math.min(last, Math.max(0, Math.ceil(centre - 2 * P.gradeWidth)));
     return { centre: Math.min(last, centre), low, high: Math.min(last, Math.floor(centre + 2 * P.gradeWidth)) };
   }
-  function rollRarity(regionIdx, shift) {
+  function gradeOdds(regionIdx, shift) {
     const c = gradeCurve(regionIdx, shift);
-    const w = (i) => Math.exp(-Math.pow(i - c.centre, 2) / (2 * P.gradeWidth * P.gradeWidth));
-    return weighted(D.RARITIES, (r, i) => (i < c.low || i > c.high ? 0 : w(i)));
+    const w = D.RARITIES.map((r, i) => (i < c.low || i > c.high ? 0 : Math.exp(-Math.pow(i - c.centre, 2) / (2 * P.gradeWidth * P.gradeWidth))));
+    const total = w.reduce((a, b) => a + b, 0);
+    return w.map((x) => x / total);
   }
+  const rollRarity = (regionIdx, shift) => weighted(gradeOdds(regionIdx, shift), (p) => p);
   function makeItem(regionIdx, slotHint, minRarity, shift) {
     const rar = Math.min(D.RARITIES.length - 1, Math.max(minRarity || 0, rollRarity(regionIdx, shift)));
     const slot = slotHint || pick(Object.keys(D.GEAR_SLOTS));
@@ -1085,6 +1112,58 @@
     if ((it.plus || 0) >= 10) { it.plus--; log(`The forge flares. ${it.name} falls back to +${it.plus}.`, 'bad'); }
     return { ok: false };
   }
+  // ---------- storage ----------
+  const BAG_STEP = 6;
+  const BAG_MAX_LEVEL = 16;
+  const bagSize = () => BAG_SIZE + BAG_STEP * (S.bagLevel || 0);
+  const bagUpgradeCost = () => ({ stones: regionStats(bestRegion()).stones * 50 * Math.pow(1.8, S.bagLevel || 0), cores: 5 * ((S.bagLevel || 0) + 1) });
+  function upgradeBag() {
+    const c = bagUpgradeCost();
+    if ((S.bagLevel || 0) >= BAG_MAX_LEVEL || !canAfford(c)) return false;
+    pay(c);
+    S.bagLevel = (S.bagLevel || 0) + 1;
+    return true;
+  }
+  const dismantleCores = (it) => Math.ceil((1 + it.rarity) * (it.region + 1) / 2);
+  function salvage(it, forCores) {
+    if (forCores) S.cores += dismantleCores(it);
+    else S.stones += itemValue(it) * mods().stones;
+  }
+  function dismantle(id) {
+    const i = S.bag.findIndex((x) => x.id === id);
+    if (i < 0 || S.bag[i].locked) return false;
+    salvage(S.bag[i], true);
+    S.bag.splice(i, 1);
+    return true;
+  }
+  function toggleLock(id) {
+    const it = S.bag.find((x) => x.id === id) || Object.values(S.gear).find((x) => x && x.id === id) || S.vault.find((x) => x.id === id);
+    if (!it) return false;
+    it.locked = !it.locked;
+    return true;
+  }
+  const shouldAutoSell = (it) => S.idleArts.salvage && S.settings.autoSellBelow >= 0 && it.rarity < S.settings.autoSellBelow && itemScore(it) <= itemScore(S.gear[it.slot]);
+  const vaultCap = () => (S.idleArts.vault ? 2 + (S.vaultLevel || 0) : 0);
+  const vaultUpgradeCost = () => Math.ceil(8 * Math.pow(1.6, S.vaultLevel || 0));
+  function upgradeVault() {
+    if (!S.idleArts.vault || (S.vaultLevel || 0) >= 6 || S.karma < vaultUpgradeCost()) return false;
+    S.karma -= vaultUpgradeCost();
+    S.vaultLevel = (S.vaultLevel || 0) + 1;
+    return true;
+  }
+  function storeInVault(id) {
+    const i = S.bag.findIndex((x) => x.id === id);
+    if (i < 0 || S.vault.length >= vaultCap()) return false;
+    S.vault.push(S.bag.splice(i, 1)[0]);
+    return true;
+  }
+  function takeFromVault(id) {
+    const i = S.vault.findIndex((x) => x.id === id);
+    if (i < 0 || S.bag.length >= bagSize()) return false;
+    S.bag.push(S.vault.splice(i, 1)[0]);
+    return true;
+  }
+
   function gainItem(regionIdx, slotHint, minRarity, shift) {
     const it = makeItem(regionIdx, slotHint, minRarity, shift);
     S.stats.items++;
@@ -1098,9 +1177,13 @@
       if (old) S.stones += itemValue(old) * mods().stones;
       return it;
     }
-    if (S.bag.length >= BAG_SIZE) {
-      S.stones += itemValue(it) * mods().stones;
-      log(`Your storage ring is full. Sold the ${it.name}.`, 'loot');
+    if (shouldAutoSell(it)) {
+      salvage(it, S.settings.salvageForCores);
+      return it;
+    }
+    if (S.bag.length >= bagSize()) {
+      salvage(it, S.idleArts.salvage && S.settings.salvageForCores);
+      log(`Your storage ring is full. ${S.idleArts.salvage && S.settings.salvageForCores ? 'Dismantled' : 'Sold'} the ${it.name}.`, 'loot');
       return it;
     }
     S.bag.push(it);
@@ -1118,7 +1201,7 @@
   }
   function sell(id) {
     const i = S.bag.findIndex((x) => x.id === id);
-    if (i < 0) return false;
+    if (i < 0 || S.bag[i].locked) return false;
     S.stones += itemValue(S.bag[i]) * mods().stones;
     S.bag.splice(i, 1);
     return true;
@@ -1127,7 +1210,7 @@
     const keep = [];
     let n = 0;
     for (const it of S.bag) {
-      if (itemScore(it) <= itemScore(S.gear[it.slot])) { S.stones += itemValue(it) * mods().stones; n++; } else keep.push(it);
+      if (!it.locked && itemScore(it) <= itemScore(S.gear[it.slot])) { S.stones += itemValue(it) * mods().stones; n++; } else keep.push(it);
     }
     S.bag = keep;
     return n;
@@ -1144,6 +1227,7 @@
     m = m || mods();
     return Math.min(0.98, p.chance + m.alch + alchLevel() * 0.01);
   }
+  const perfectChance = () => Math.min(1, 0.08 + Math.max(0, mods().luck) * 0.002);
   function refine(id) {
     const p = D.PILLS.find((x) => x.id === id);
     if (!p || S.stage < p.stage) return false;
@@ -1155,7 +1239,7 @@
       log(`The furnace cracks. Your ${p.name} is ash.`, 'bad');
       return { ok: false };
     }
-    const perfect = rng() < 0.08 + Math.max(0, mods().luck) * 0.002;
+    const perfect = rng() < perfectChance();
     const n = perfect ? 2 : 1;
     S.pills[id] = (S.pills[id] || 0) + n;
     const grade = rollLadder('pills', alchLevel() * 0.05);
@@ -1203,6 +1287,7 @@
     const sect = D.SECTS.find((x) => x.id === id);
     if (!sect) return false;
     S.sect = { id, rank: 0, contribution: 0, earned: 0, manual: 0, board: [], active: [], boardIn: 0 };
+    S.lastSect = id;
     refreshBoard();
     log(`You kneel at the gate of the ${sect.name} (${sect.zh}) and are given a grey robe.`, 'story');
     return true;
@@ -1316,13 +1401,18 @@
   }
 
   // ---------- divination ----------
+  function fortuneOdds() {
+    const luck = mods().luck;
+    const w = D.FORTUNES.map((f, i) => f.weight * Math.pow(1 + Math.max(luck, -40) * 0.008, i - 2));
+    const total = w.reduce((a, b) => a + b, 0);
+    return w.map((x) => x / total);
+  }
   const divineCost = () => regionStats(bestRegion()).stones * 6;
   function divine() {
     const c = divineCost();
     if (S.stones < c) return false;
     S.stones -= c;
-    const luck = mods().luck;
-    const idx = weighted(D.FORTUNES, (f, i) => f.weight * Math.pow(1 + Math.max(luck, -40) * 0.008, i - 2));
+    const idx = weighted(fortuneOdds(), (p) => p);
     const f = D.FORTUNES[idx];
     addBuff('fortune', `${f.name} ${f.zh}`, f.secs, f.fx);
     S.stats.draws++;
@@ -1437,6 +1527,100 @@
     return gain;
   }
 
+  // ---------- idle arts ----------
+  const hasArt = (id) => !!S.idleArts[id];
+  function buyIdleArt(id) {
+    const a = D.IDLE_ARTS.find((x) => x.id === id);
+    if (!a || hasArt(id) || S.karma < a.cost) return false;
+    S.karma -= a.cost;
+    S.idleArts[id] = 1;
+    if (a.setting) S.settings[a.setting] = true;
+    if (id === 'salvage' && S.settings.autoSellBelow < 0) S.settings.autoSellBelow = 2;
+    log(`You learn the Idle Art ${a.name} (${a.zh}).`, 'rare');
+    return true;
+  }
+  const artOn = (id) => hasArt(id) && S.settings[D.IDLE_ARTS.find((x) => x.id === id).setting];
+  function setPillTarget(id, n) {
+    S.pillTargets[id] = Math.max(0, Math.min(20, n));
+    return true;
+  }
+  // The safest-looking region and depth to hunt: the deepest where a fight should not kill you.
+  function bestSafeHunt() {
+    const st = stats();
+    const safe = (r) => r.dmg * Math.ceil(r.hp * 1.2 / st.atk) < st.hp * 0.6;
+    let best = { region: 0, depth: 0 };
+    for (let i = 0; i <= bestRegion(); i++) {
+      for (let d = 0; d <= (S.maxDepth[i] || 0); d++) if (safe(foeStats(i, d))) best = { region: i, depth: d };
+    }
+    return best;
+  }
+  function bossLooksWinnable() {
+    const st = stats();
+    const r = foeStats(S.region, S.depth);
+    return r.hp * P.bossHp / (st.atk * 3) < 60 && r.dmg * P.bossDmg * 15 < st.hp;
+  }
+  function tickIdle(dt) {
+    S.idleClock = (S.idleClock || 0) + dt;
+    if (S.encounter) S.encounterWait = (S.encounterWait || 0) + dt;
+    else S.encounterWait = 0;
+    if (S.idleClock < 1) return;
+    S.idleClock = 0;
+    if (artOn('sect')) {
+      if (!S.sect && S.lastSect && S.stage >= sectJoinStage) joinSect(S.lastSect);
+      if (S.sect) {
+        while (S.sect.active.length < missionSlots() && S.sect.board.length) {
+          const b = S.sect.board.slice().sort((x, y) => (y.rank || 0) - (x.rank || 0))[0];
+          if (!startMission(b.id)) break;
+        }
+        if (realmGates().some((g) => g.tab === 'sect' && !g.met)) while (S.cores >= donationSize() * 2 && donateCores()) { /* buy rank with spare cores */ }
+      }
+    }
+    if (artOn('meridian') && S.meridians < D.MERIDIANS.length && S.stage >= S.meridians * 4) openMeridian();
+    if (artOn('region') && !S.fight && S.recover <= 0) {
+      const b = bestSafeHunt();
+      if (S.region !== b.region) setRegion(b.region);
+      if (S.depth !== b.depth) setDepth(b.depth);
+      if (!S.hunting) setHunting(true);
+    }
+    if (artOn('boss') && canSummonBoss() && bossLooksWinnable()) summonBoss();
+    if (artOn('pills')) {
+      for (const id in S.pillTargets) {
+        const p = D.PILLS.find((x) => x.id === id);
+        if (!p || S.stage < p.stage || (S.pills[id] || 0) >= S.pillTargets[id]) continue;
+        const cost = pillCost(p);
+        if (canAfford(cost) && cost.stones < S.stones * 0.25) refine(id);
+      }
+      if (S.pills.gather && !S.buffs.some((b) => b.id === 'gather')) usePill('gather');
+      if (S.pills.heal && S.injury > 0) usePill('heal');
+      if (S.pills.foundation && isMajor(S.stage) && S.btBonus < 0.36 && S.qi >= stageCost(S.stage) * 0.9) usePill('foundation');
+    }
+    if (artOn('abode')) {
+      const open = D.ABODE.filter((a) => (S.abode[a.id] || 0) < a.max && S.cores >= abodeCores(a)).sort((a, b) => abodeCost(a) - abodeCost(b))[0];
+      if (open && abodeCost(open) < S.stones * 0.2) buildAbode(open.id);
+    }
+    if (artOn('beast')) {
+      if (S.eggs > 0) hatchEgg();
+      if (S.beast && S.herbs > beastFeedCost() * 4 && S.cores >= beastFeedCores() * 3) feedBeast();
+    }
+    if (artOn('forge')) {
+      for (const slot in S.gear) {
+        const it = S.gear[slot];
+        if (it && it.plus < forgeCap(it) && S.stones > forgeCost(it) * 5 && S.cores > forgeCores(it) * 3) { forge(slot); break; }
+      }
+    }
+    if (artOn('major') && isMajor(S.stage) && !S.ascendReady && S.injury <= 0 && canAttempt() && btChance() >= S.settings.majorThreshold) attemptBreakthrough();
+    if (artOn('fate') && S.encounter && S.encounterWait >= 20) {
+      const e = D.ENCOUNTERS[S.encounter.i];
+      const order = e.choices.map((ch, i) => ({ i, p: ch.chance })).sort((a, b) => b.p - a.p);
+      for (const o of order) if (chooseEncounter(o.i)) break;
+    }
+  }
+  function idleRebirth() {
+    if (!artOn('rebirth')) return;
+    if (S.dead) reincarnate();
+    if (S.choosingRoot) confirmRoot();
+  }
+
   // ---------- main loop ----------
   function checkFeats() {
     for (const f of D.FEATS) {
@@ -1452,11 +1636,13 @@
     const open = TECHS.filter((t) => S.stage >= t.unlock && !techMaxed(t.id));
     for (const t of open.slice().sort((a, b) => techCost(a).stones - techCost(b).stones)) {
       const c = techCost(t);
-      if (!c.qi && canAfford(c)) buyTech(t.id);
+      // Qi-priced techniques are bought only while cheap next to the stage, so study never stalls cultivation.
+      if (canAfford(c) && (!c.qi || c.qi < stageCost(S.stage) * 0.2)) buyTech(t.id);
     }
   }
 
   function tick(dt) {
+    if (S && (S.dead || S.choosingRoot)) idleRebirth();
     if (!S || S.dead || S.choosingRoot) return;
     S.stats.playSeconds += dt;
     const m = mods();
@@ -1468,6 +1654,7 @@
     tickCombat(dt, m);
     tickSect(dt, m);
     tickAbode(dt, m);
+    tickIdle(dt);
     if (!S.encounter) {
       S.encounterIn -= dt;
       if (S.encounterIn <= 0) rollEncounter();
@@ -1512,6 +1699,11 @@
     const hits = Math.ceil(r.hp / st.atk);
     if (!S.hunting || r.dmg * hits >= st.hp) return null;
     return { killsPerSec: 1 / (hits + 1), r };
+  }
+  function offlineFindOdds() {
+    const boost = 1 + Math.max(0, mods().luck) * 0.005;
+    const item = Math.min(1, P.offlineFindItem * boost);
+    return { item, egg: (1 - item) * Math.min(1, P.offlineFindEgg * boost) };
   }
   function applyOffline(seconds) {
     if (!S || S.dead || S.choosingRoot) return null;
@@ -1601,6 +1793,9 @@
     joinSect, leaveSect, startMission, missionSlots, missionChance, treasury, buyTreasury,
     divine, divineCost, choiceCost, canChoose, chooseEncounter,
     ladderCurve, ladderOdds, rollLadder, reforge, reforgeCost,
+    bagSize, bagUpgradeCost, upgradeBag, BAG_MAX_LEVEL, dismantle, dismantleCores, toggleLock, vaultCap, vaultUpgradeCost, upgradeVault, storeInVault, takeFromVault,
+    hasArt, buyIdleArt, setPillTarget, bestSafeHunt,
+    fortuneOdds, gradeOdds, foeTierOdds, dropChance, herbChance, perfectChance, offlineFindOdds, tribSurvival, rootImproveChance,
     fateLuck, gradeCurve, rollRarity, modSources, beastLuck, resolveAway, realmGates, gatesMet, perfectionList, rootPurityMult,
     bestPillGrade, techQuality, techMaxed, contemplate, contemplateCost, meridianCores, purityMult, temperCost, temperMeridian, siteMult, abodeCores, surveyCost, surveySite,
     forgeCap, forgeCores, itemQuality, beastCap, beastStage, beastFeedCores, donateCores, donationSize, donationReward, skillRank,

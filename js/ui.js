@@ -8,11 +8,13 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const pct = (x) => `${Math.round(x * 100)}%`;
+  // Small odds keep a decimal, so a 0.4% chance never reads as 0%.
+  const pct1 = (x) => (x > 0 && x < 0.1 ? `${(x * 100).toFixed(x < 0.01 ? 2 : 1)}%` : pct(x));
   const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const TABS = [
     ['cultivate', 'Cultivate'], ['combat', 'Combat'], ['gear', 'Artifacts'], ['sect', 'Sect'], ['alchemy', 'Alchemy'],
-    ['abode', 'Abode'], ['fate', 'Fate'], ['rebirth', 'Rebirth'], ['records', 'Records'],
+    ['abode', 'Abode'], ['idle', 'Idle Arts'], ['fate', 'Fate'], ['rebirth', 'Rebirth'], ['records', 'Records'],
   ];
   const TAB_NOTES = {
     cultivate: 'Techniques and meridians: the slow, steady heart of your power.',
@@ -21,6 +23,7 @@
     sect: 'Join a sect for bonuses, a signature art, missions and a treasury.',
     alchemy: 'Refine herbs into pills. Practice improves your success rate.',
     abode: 'Your cave home and spirit beast companion.',
+    idle: 'Permanent automation bought with karma, so the game keeps playing well while you are away.',
     fate: 'Fortune sticks, luck, and the encounters that find you.',
     rebirth: 'Karma, ascension and the Tree of the Dao.',
     records: 'Your annals, feats, the Codex and your save.',
@@ -108,10 +111,18 @@
       return `<span class="kv ${mark}"><span>${x.zh ? `${x.zh} ` : ''}${x.name}${i === have ? ' (yours)' : ''}</span><span>${odds[i] ? `${(odds[i] * 100).toFixed(odds[i] < 0.01 ? 2 : 0)}%` : '—'} · ×${x.mult}</span></span>`;
     }).filter(Boolean);
     lines.unshift(`Rolls now centre on ${list[Math.round(c.centre)].name} and climb with your realm and heavens. ${list.length} grades in all.`);
+    if (have !== undefined && have >= 0) lines.unshift(`<b>Chance a roll beats yours: ${pct1(odds.reduce((p, o, i) => p + (i > have ? o : 0), 0))}</b>`);
     return lines;
   }
   // Tells the player when a past roll has fallen below what they could roll today.
   const belowCurve = (key, have, bonus) => have !== undefined && have < Math.round(G.ladderCurve(key, bonus).centre);
+  function foeOdds(foe) {
+    const S = G.S;
+    if (foe.tier === 'boss') return '<b>Drops: a guaranteed high-grade artifact (two on a first kill), and a 30% chance of a beast egg.</b>';
+    if (foe.tier === 'duel') return '<b>A first win always pays a treasure.</b>';
+    if (foe.tier === 'tower') return '<b>Every 10th new floor opens a treasure chest.</b>';
+    return `<b>At your luck: ${pct1(G.dropChance(foe.tier, S.depth))} artifact, ${pct1(G.herbChance(foe.tier))} herbs${foe.tier === 'champion' ? ', 10% beast egg' : ''}.</b>`;
+  }
   const goLink = (label, tabId) => `<button type="button" class="link small" data-a="tab:${tabId}">${label} →</button>`;
   function stageLabel(stage) { return `Stage ${G.stageInRealm(stage) + 1} of ${D.STAGES_PER_REALM}`; }
 
@@ -197,6 +208,8 @@
     const staleGear = Object.keys(S.gear).find((k) => S.gear[k] && belowCurve('condition', S.gear[k].cond === undefined ? 3 : S.gear[k].cond, S.gear[k].rarity * 0.1));
     if (staleGear && S.cores >= G.reforgeCost(S.gear[staleGear])) add(`Your ${D.GEAR_SLOTS[staleGear].name.toLowerCase()} could be reforged to a better condition`, 'gear');
     if (S.meridianQ.some((q) => belowCurve('purity', q)) && S.cores >= 2) add('A meridian could be tempered purer now', 'cultivate');
+    if (D.IDLE_ARTS.some((a) => !G.hasArt(a.id) && S.karma >= a.cost)) add('An Idle Art is affordable', 'idle');
+    if (S.bag.length >= G.bagSize() - 2) add('Your storage ring is almost full', 'gear');
     if (D.KARMA_UPS.some((u) => (S.karmaUps[u.id] || 0) < u.max && S.karma >= G.karmaCost(u))) add('Karma can be spent', 'rebirth');
     if (D.DAO_UPS.some((u) => (S.dao[u.id] || 0) < u.max && S.daoMarks >= G.daoCost(u))) add('Dao Marks can be spent', 'rebirth');
     if (G.TECHS.some((t) => S.stage >= t.unlock && !G.techMaxed(t.id) && G.techCost(t).stones && G.canAfford(G.techCost(t)))) add('You can afford to study a technique', 'cultivate');
@@ -224,7 +237,7 @@
     if (S.ascendReady) main = btn('Ascend to the next heaven', 'askAscend', true, 'primary big');
     else if (major) {
       const nextTrib = S.stage >= G.maxStage() || G.realmOf(S.stage + 1) >= G.TRIB_FROM_REALM;
-      main = btn(`${S.stage >= G.maxStage() ? 'Face the ascension tribulation' : 'Attempt breakthrough'} · ${pct(G.btChance(m))}${nextTrib ? ' + lightning' : ''}`, 'advance', G.canAttempt(), 'primary big', tip('Major breakthrough', [`Base chance ${pct(Math.max(0.3, 0.8 - G.realmOf(S.stage) * 0.06))}. Falls 6% per realm, never below 30%.`, ...sourceLines('bt'), S.btBonus ? `Foundation Pills: +${pct(S.btBonus)}` : '', 'Failure costs 40% of the Qi and injures you for 30 seconds or so. Lightning that defeats you costs 50% and 5 years.'], 'Clouds gather first. Elders say to bring an umbrella. It does not help.'));
+      main = btn(`${S.stage >= G.maxStage() ? 'Face the ascension tribulation' : 'Attempt breakthrough'} · ${pct(G.btChance(m))}${nextTrib ? ' + lightning' : ''}`, 'advance', G.canAttempt(), 'primary big', tip('Major breakthrough', [`<b>Your chance now: ${pct1(G.btChance(m))}</b>. Qi deviation: ${pct1(1 - G.btChance(m))}.`, nextTrib ? `<b>Estimated lightning survival: ${pct1(G.tribSurvival())}</b>, from 200 simulated tribulations at your current vitality.` : 'No lightning for this breakthrough.',`Base chance ${pct(Math.max(0.3, 0.8 - G.realmOf(S.stage) * 0.06))}. Falls 6% per realm, never below 30%.`, ...sourceLines('bt'), S.btBonus ? `Foundation Pills: +${pct(S.btBonus)}` : '', 'Failure costs 40% of the Qi and injures you for 30 seconds or so. Lightning that defeats you costs 50% and 5 years.'], 'Clouds gather first. Elders say to bring an umbrella. It does not help.'));
     } else main = btn('Advance to next stage', 'advance', G.canAttempt(), 'big', tip('Minor stage', [`Costs ${fmt(cost)} Qi and never fails.`, `Stage ${G.stageInRealm(S.stage) + 1} of ${D.STAGES_PER_REALM}. The ninth stage needs a major breakthrough.`]));
 
     const chips = [];
@@ -320,7 +333,7 @@
       else if (foe) {
         const warn = foe.charging > 0 ? `<div class="charge">Charging a killing blow: ${foe.charging.toFixed(1)}s. Guard now!</div>` : foe.stun > 0 ? `<div class="good small">Stunned ${foe.stun.toFixed(1)}s</div>` : '<div class="small">&nbsp;</div>';
         const tag = { elite: 'chip gold', champion: 'chip warn', boss: 'chip warn', duel: 'chip warn', tower: 'chip gold' }[foe.tier];
-        card = `<div class="kv"><b${tip(esc(foe.name), [{ normal: 'An ordinary foe. It pays little but fills the boss meter.', elite: 'Elites have 3× health, pay 4× stones and often drop artifacts. They charge killing blows.', champion: 'Champions have 7× health, pay 14× stones, and may carry a beast egg.', boss: 'A region lord: guaranteed high-grade drops. A first kill is permanent.', duel: 'A named master of the jianghu. Your record against them survives rebirth.', tower: 'A floor warden. Each floor is 50% tougher than the last.' }[foe.tier], `Charged blows hit for 5× and cost 50 Momentum. Guard turns one into a parry.`])}>${esc(foe.name)}</b>${tag ? `<span class="${tag}">${foe.tier}</span>` : ''}</div>
+        card = `<div class="kv"><b${tip(esc(foe.name), [{ normal: 'An ordinary foe. It pays little but fills the boss meter.', elite: 'Elites have 3× health, pay 4× stones and often drop artifacts. They charge killing blows.', champion: 'Champions have 7× health, pay 14× stones, and may carry a beast egg.', boss: 'A region lord: guaranteed high-grade drops. A first kill is permanent.', duel: 'A named master of the jianghu. Your record against them survives rebirth.', tower: 'A floor warden. Each floor is 50% tougher than the last.' }[foe.tier], `Charged blows hit for 5× and cost 50 Momentum. Guard turns one into a parry.`, foeOdds(foe)])}>${esc(foe.name)}</b>${tag ? `<span class="${tag}">${foe.tier}</span>` : ''}</div>
           <div class="kv small"><span class="dim">Dealing ${fmt(foe.dmg)}/s</span><span>${fmt(Math.max(0, foe.hp))} / ${fmt(foe.maxHp)}</span></div>${bar(foe.hp / foe.maxHp, 'hp')}${warn}`;
       } else card = `<div class="dim small">${S.hunting ? 'Searching for prey.' : 'You are at rest. Begin hunting to fight.'}</div>`;
       const fightBar = `<div class="kv small">${f ? `<span class="good">${f.kind === 'tower' ? `Tower of Trials, floor ${f.floor}` : f.kind === 'duel' ? 'Martial Tournament' : 'Boss battle'}</span><span>${Math.ceil(f.t)}s left</span>` : `<span class="dim">Hunting in ${D.REGIONS[S.region].name}, depth ${S.depth + 1}</span><span></span>`}</div>`;
@@ -340,7 +353,7 @@
         const fs = G.foeStats(i, S.region === i ? S.depth : 0);
         const risk = fs.dmg * Math.ceil(fs.hp / st.atk) > st.hp ? '<span class="bad">Deadly</span>' : fs.hp / st.atk > 6 ? '<span class="dim">Slow</span>' : '<span class="good">Manageable</span>';
         return row(`<div class="title">${zh(r.zh)} ${r.name}</div><div class="dim small">Foes ${fmt(fs.hp)} HP, ${fmt(fs.dmg)} dmg/s · ${fmt(fs.stones)} stones · ${risk} · deepest ${(S.maxDepth[i] || 0) + 1} of ${D.MAX_DEPTH + 1}</div>`,
-          btn(S.region === i ? 'Here' : 'Travel', `region:${i}`, S.region !== i && !f), S.region === i ? 'done' : '', tip(`${r.zh} ${r.name}`, [`Foes: ${r.foes.join(', ')}.`, `Trophies here: ${Array.from({ length: D.MAX_DEPTH + 1 }, (_, d) => d).filter((d) => S.trophies[`${i}:${d}`]).length} of ${D.MAX_DEPTH + 1}.`], WD.LORE.regions[i]));
+          btn(S.region === i ? 'Here' : 'Travel', `region:${i}`, S.region !== i && !f), S.region === i ? 'done' : '', tip(`${r.zh} ${r.name}`, [`Foes: ${r.foes.join(', ')}.`, `<b>Each foe at your luck: ${pct1(G.foeTierOdds().elite)} elite, ${pct1(G.foeTierOdds().champion)} champion.</b>`, `Artifact drop chance here: ${pct1(G.dropChance('normal', S.region === i ? S.depth : 0))} ordinary, ${pct1(G.dropChance('elite', S.region === i ? S.depth : 0))} elite, ${pct1(G.dropChance('champion', S.region === i ? S.depth : 0))} champion.`, `Trophies here: ${Array.from({ length: D.MAX_DEPTH + 1 }, (_, d) => d).filter((d) => S.trophies[`${i}:${d}`]).length} of ${D.MAX_DEPTH + 1}.`], WD.LORE.regions[i]));
       }).reverse().join('');
       const depths = [];
       for (let d = 0; d <= (S.maxDepth[S.region] || 0); d++) depths.push(btn(`${d + 1}`, `depth:${d}`, S.depth !== d && !f, S.depth === d ? 'on-depth' : '', tip(`Depth ${d + 1}`, [`Foe health ×${fmt(Math.pow(G.P.depthHp, d))}, damage ×${fmt(Math.pow(G.P.depthDmg, d))}, stones ×${fmt(Math.pow(G.P.depthStones, d))}.`, 'Deeper foes also roll higher grades and drop artifacts more often.', S.trophies[`${S.region}:${d}`] ? '<span class="good">Trophy earned.</span>' : 'Boss not yet slain at this depth.'])));
@@ -365,7 +378,7 @@
         <div class="section"><div class="kv"><h2>Region Boss</h2><span class="dim small">${S.bossMeter} of ${G.BOSS_METER} kills</span></div>
           ${bar(S.bossMeter / G.BOSS_METER, 'gold')}
           <div class="toolbar">${btn(`Summon the Lord of ${D.REGIONS[S.region].name}`, 'boss', G.canSummonBoss(), 'primary')}</div>
-          <div class="dim small">Bosses drop artifacts of guaranteed high grade. A first kill earns a trophy and opens the next depth, where foes and rewards both grow.</div>
+          <div class="dim small">Bosses drop artifacts of guaranteed high grade, with a 30% chance of a beast egg. A first kill earns a trophy and opens the next depth, where foes and rewards both grow.</div>
           <div class="toolbar"><span class="small">Depth</span>${depths.join('')}</div></div>
         <div class="section"><h2>Regions</h2><div class="stack">${regions}</div></div>
         <div class="section"><div class="kv"><h2>Tower of Trials ${zh('通天塔')}</h2><b>Best floor ${S.towerBest}</b></div>
@@ -383,13 +396,13 @@
         const it = S.gear[slot];
         const fc = it && { stones: G.forgeCost(it), cores: G.forgeCores(it) };
         const reforge = it && (it.cond === undefined ? 3 : it.cond) < D.CONDITIONS.length - 1 ? btn(`Reforge ${G.reforgeCost(it)} cores`, `reforge:${slot}`, S.cores >= G.reforgeCost(it), 'ghost', tip('Reforge condition', ['Reroll this artifact\'s condition. Only a better result is kept. Higher grades roll better.', ...ladderLines('condition', D.CONDITIONS, it.cond === undefined ? 3 : it.cond, it.rarity * 0.1)])) : '';
-        const action = !it ? goLink('Find artifacts', 'combat') : reforge + (it.plus >= G.forgeCap(it) ? '<span class="good small">Perfected</span>' : btn(`Forge ${costText(fc)} · ${pct(G.forgeChance(it))}`, `forge:${slot}`, G.canAfford(fc)) + shortLink(fc));
+        const action = !it ? goLink('Find artifacts', 'combat') : reforge + (it.plus >= G.forgeCap(it) ? '<span class="good small">Perfected</span>' : btn(`Forge ${costText(fc)} · ${pct(G.forgeChance(it))}`, `forge:${slot}`, G.canAfford(fc), '', tip('Forge', [`<b>Success: ${pct(G.forgeChance(it))}</b>. It falls 5% per level, never below 20%. Luck does not affect forging.`, (it.plus || 0) >= 10 ? 'A failure at +10 or above drops one level.' : 'A failure below +10 costs only the materials.'])) + shortLink(fc));
         return row(`<div class="small dim">${zh(D.GEAR_SLOTS[slot].zh)} ${D.GEAR_SLOTS[slot].name}</div>${it ? itemText(it) : '<div class="dim small">Empty</div>'}`, action, '', it ? itemTip(it) : tip(D.GEAR_SLOTS[slot].name, `Provides ${D.GEAR_SLOTS[slot].stat.toLowerCase()}. Nothing equipped yet.`));
       }).join('');
       const bag = S.bag.slice().sort((a, b) => b.rarity - a.rarity || G.itemScore(b) - G.itemScore(a)).map((it) => {
         const better = G.itemScore(it) > G.itemScore(S.gear[it.slot]);
         return row(`<div class="small dim">${D.GEAR_SLOTS[it.slot].name}${better ? ' · <span class="good">Upgrade</span>' : ''}</div>${itemText(it)}`,
-          btn('Equip', `equip:${it.id}`) + btn(`Sell ${fmt(G.itemValue(it) * G.mods().stones)}`, `sell:${it.id}`, true, 'ghost'), '', itemTip(it));
+          btn('Equip', `equip:${it.id}`) + `<span class="inline">${btn(it.locked ? 'Unlock' : 'Lock', `lock:${it.id}`, true, 'ghost', tip(it.locked ? 'Locked' : 'Lock', 'Locked artifacts are never sold or dismantled, by hand or automatically.'))}${btn(`Sell ${fmt(G.itemValue(it) * G.mods().stones)}`, `sell:${it.id}`, !it.locked, 'ghost')}${btn(`Dismantle ${G.dismantleCores(it)}c`, `dismantle:${it.id}`, !it.locked, 'ghost', tip('Dismantle', `Break this down into ${G.dismantleCores(it)} Beast Cores instead of selling it.`))}${G.vaultCap() ? btn('Vault', `vaultIn:${it.id}`, S.vault.length < G.vaultCap(), 'ghost', tip('Ancestral Vault', 'Store this artifact. Vault contents survive rebirth.')) : ''}</span>`, '', itemTip(it));
       }).join('');
       const seen = S.stats.bestRarity;
       const ladder = D.RARITIES.map((r, i) => `<span class="grade ${r.shimmer && i <= seen ? 'shimmer' : ''}" style="color:${i <= seen ? r.color : 'var(--line)'}"${i <= seen ? tip(`${r.zh} ${r.name}`, [`Grade ${i + 1} of ${D.RARITIES.length}. Base power ×${fmt(r.mult)}.`, i === 0 ? '' : `${i <= 4 ? '' : `Up to ${1 + Math.floor(i / 5)} bonus stats. `}1.9× stronger than the grade below.`], gradeLore(i)) : tip('Undiscovered grade', 'Find one to learn its name.')}>${i <= seen ? r.zh : '?'}</span>`).join('');
@@ -398,15 +411,41 @@
           ${(() => {
             const c = G.gradeCurve(S.region, S.depth);
             const name = (i) => D.RARITIES[i].name;
-            return `<div class="kv small"><span>Drops here: ${name(c.low)} to ${name(c.high)}</span><span class="dim">most often ${name(Math.round(c.centre))}</span></div>
+            return `<div class="kv small"${tip('Artifact grade odds here', ['For an ordinary drop at this region and depth, at your luck. Elites, champions and bosses roll higher.', ...G.gradeOdds(S.region, S.depth).map((o, i) => (o ? `<span class="kv"><span>${D.RARITIES[i].zh} ${D.RARITIES[i].name}</span><span>${pct1(o)}</span></span>` : '')).filter(Boolean)])}><span>Drops here: ${name(c.low)} to ${name(c.high)}</span><span class="dim">most often ${name(Math.round(c.centre))}</span></div>
               <div class="kv small"${tip('Fate luck', [`Your luck of ${fmt(G.mods().luck)}, multiplied by ${fmt(G.mods().luck > 0 ? G.fateLuck() / G.mods().luck : 1)} for your realm and ascensions.`, 'Luck sources:', ...sourceLines('luck'), `Curve centre ${c.centre.toFixed(1)}, on the ladder of 24 grades. The luck part of it maxes out at ${G.P.gradeLuckCap} grades.`])}><span class="dim">Fate luck (luck boosted by realm and ascensions)</span><span>${fmt(G.fateLuck())}</span></div>`;
           })()}
           <div class="dim small">Each grade is 1.9× stronger than the one below. Your realm, region, depth, luck and ascensions raise the whole range, and grades below it stop dropping. Bosses and champions roll higher still.</div></div>
         <div class="section"><h2>Equipped</h2><div class="stack">${gear}</div>
           <div class="dim small">Each forge level adds 20% power to weapons and robes, or 5% to rings and talismans, up to a limit set by grade. The final level adds 50% and earns a Perfection. Failing above +10 costs a level.</div></div>
-        <div class="section"><div class="kv"><h2>Storage Ring</h2><span class="dim small">${S.bag.length} of ${G.BAG_SIZE}</span></div>
+        <div class="section"><div class="kv"><h2>Storage Ring</h2><span class="dim small">${S.bag.length} of ${G.bagSize()}</span></div>
+          ${(S.bagLevel || 0) < G.BAG_MAX_LEVEL ? row(`<div class="title">Expand the ring</div><div class="dim small">+6 slots. Level ${S.bagLevel || 0} of ${G.BAG_MAX_LEVEL}. Expansions are permanent.</div>`, btn(costText(G.bagUpgradeCost()), 'bagUp', G.canAfford(G.bagUpgradeCost())) + shortLink(G.bagUpgradeCost())) : '<div class="good small">Your storage ring is fully expanded.</div>'}
           <div class="toolbar">${btn('Equip upgrades', 'equipBest', S.bag.length > 0)}${btn('Sell non-upgrades', 'sellBad', S.bag.length > 0, 'ghost')}${toggle('autoEquip', 'Auto-equip upgrades')}</div>
-          <div class="stack">${bag || '<div class="dim small">Hunt, explore and take risks to find artifacts.</div>'}</div></div>`;
+          <div class="stack">${bag || '<div class="dim small">Hunt, explore and take risks to find artifacts.</div>'}</div></div>
+        <div class="section"><div class="kv"><h2>Ancestral Vault ${zh('祖库')}</h2><span class="dim small">${G.vaultCap() ? `${S.vault.length} of ${G.vaultCap()}` : 'locked'}</span></div>
+          ${G.vaultCap() ? `<div class="dim small">Artifacts here survive rebirth and ascension. Take them out to equip them.</div>${S.vault.map((it) => row(itemText(it), btn('Take out', `vaultOut:${it.id}`, S.bag.length < G.bagSize()), '', itemTip(it))).join('') || '<div class="dim small">Empty. Use the Vault button on an artifact in your ring.</div>'}` : `<div class="dim small">Learn the Ancestral Vault Idle Art to keep artifacts between lives.</div>${goLink('Idle Arts', 'idle')}`}</div>`;
+    },
+
+    idle() {
+      const S = G.S;
+      const arts = D.IDLE_ARTS.map((a) => {
+        const owned = G.hasArt(a.id);
+        const control = owned ? (a.setting ? toggle(a.setting, 'On') : '<span class="good small">Learned</span>') : btn(`${a.cost} karma`, `art:${a.id}`, S.karma >= a.cost);
+        return row(`<div class="title">${zh(a.zh)} ${a.name}</div><div class="dim small">${a.desc}</div>`, control, owned ? 'done' : '', tip(`${a.zh} ${a.name}`, [a.desc, owned ? 'Learned for good: it survives rebirth and ascension.' : `Costs ${a.cost} karma, once.`]));
+      }).join('');
+      const pills = D.PILLS.filter((p) => S.pillTargets[p.id] !== undefined || ['gather', 'heal', 'foundation', 'insight', 'longevity'].includes(p.id)).map((p) => {
+        const n = S.pillTargets[p.id] || 0;
+        return `<div class="kv small"><span>${zh(p.zh)} ${p.name}</span><span class="inline">${btn('−', `pillT:${p.id}:${n - 1}`, n > 0, 'ghost')}<b class="count">${n}</b>${btn('+', `pillT:${p.id}:${n + 1}`, n < 20, 'ghost')}</span></div>`;
+      }).join('');
+      const grades = D.RARITIES.map((r, i) => `<option value="${i}"${S.settings.autoSellBelow === i ? ' selected' : ''}>Below ${r.name}</option>`).join('');
+      const ring = G.hasArt('salvage') ? `<div class="kv small"><label for="autosell">Auto-clear new artifacts</label><select id="autosell" data-s="autoSellBelow"><option value="-1"${S.settings.autoSellBelow < 0 ? ' selected' : ''}>Off</option>${grades}</select></div>
+          <div class="small">${toggle('salvageForCores', 'Dismantle into cores instead of selling')}</div>
+          <div class="dim small">Upgrades and locked artifacts are always kept.</div>` : '<div class="dim small">Learn Ring Steward to clear low-grade artifacts automatically.</div>';
+      const vault = G.hasArt('vault') ? row(`<div class="title">Ancestral Vault</div><div class="dim small">${G.vaultCap()} slots. Up to 8.</div>`, (S.vaultLevel || 0) < 6 ? btn(`+1 slot · ${G.vaultUpgradeCost()} karma`, 'vaultUp', S.karma >= G.vaultUpgradeCost()) : '<span class="good small">Full size</span>') : '';
+      return `<div class="section"><div class="kv"><h2>Idle Arts ${zh('无为')}</h2><span class="dim small">${fmt(S.karma)} karma</span></div>
+          <div class="dim small">Each art is learned once with karma and kept forever. Switch any of them off at will.</div>${arts}</div>
+        <div class="section"><h2>Furnace Spirit Stock</h2><div class="dim small">${G.hasArt('pills') ? 'Pills to keep on hand. The furnace spirit refines up to these counts when a batch costs under a quarter of your stones.' : 'Learn Furnace Spirit to keep pills stocked.'}</div>${pills}</div>
+        <div class="section"><h2>Unwavering Heart</h2>${G.hasArt('major') ? `<div class="kv small"><label for="majorThreshold">Attempt major breakthroughs at</label><select id="majorThreshold" data-s="majorThreshold">${[0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9].map((v) => `<option value="${v}"${Math.abs(S.settings.majorThreshold - v) < 0.001 ? ' selected' : ''}>${Math.round(v * 100)}% odds or better</option>`).join('')}</select></div><div class="dim small">Your odds right now: ${pct1(G.btChance())}.</div>` : '<div class="dim small">Learn Unwavering Heart to break through on your own.</div>'}</div>
+        <div class="section"><h2>Ring Steward</h2>${ring}${vault}</div>`;
     },
 
     abode() {
@@ -426,14 +465,14 @@
         beast = row(`<div class="title" style="color:${r.color}">${r.zh} · ${zh(sp.zh)} ${sp.name} <span class="dim small">${D.BEAST_STAGES[G.beastStage()].name} · Lv ${S.beast.level} of ${G.beastCap()}</span></div><div class="dim small">${label}</div>`, S.beast.level >= G.beastCap() ? '<span class="good small">Perfected</span>' : btn(`Feed ${costText({ herbs: G.beastFeedCost(), cores: G.beastFeedCores() })}`, 'feed', G.canAfford({ herbs: G.beastFeedCost(), cores: G.beastFeedCores() })) + shortLink({ herbs: G.beastFeedCost(), cores: G.beastFeedCores() }), '', tip(`${sp.zh} ${sp.name}`, [`Grade: ${r.name}, which limits it to level ${G.beastCap()}. Each level adds 10% power, and each evolution multiplies it by 1.5:`, ...D.BEAST_STAGES.map((x) => `<span class="kv"><span>${x.zh} ${x.name}</span><span>Lv ${x.level}</span></span>`), 'Reaching its limit earns a Perfection that doubles it.'], WD.LORE.beasts[sp.id]));
       }
       const hunt = G.huntOutlook(G.mods());
-      const away = `<div class="section"><div class="kv"${tip('Seclusion', [`Base ${pct(G.P.offlineRate)}. Each chamber level adds ${pct(G.P.offlineRatePerChamber)}, each Dao of Stillness level ${pct(G.P.offlineRatePerDao)}, up to ${pct(G.P.offlineRateMax)}.`, `Time limit: up to ${G.P.offlineCapMax} hours.`, `Absences of 30 minutes or more grant Seclusion Insight afterwards.`, `Each full hour away, up to ${G.P.offlineFindsMax}, can turn up an artifact or egg. Luck helps.`], WD.LORE.seclusion)}><h2>Seclusion ${zh('闭关')}</h2><b>${pct(G.offlineRate())} income, ${fmt(G.offlineCapHours())} hours</b></div>
+      const away = `<div class="section"><div class="kv"${tip('Seclusion', [`Base ${pct(G.P.offlineRate)}. Each chamber level adds ${pct(G.P.offlineRatePerChamber)}, each Dao of Stillness level ${pct(G.P.offlineRatePerDao)}, up to ${pct(G.P.offlineRateMax)}.`, `Time limit: up to ${G.P.offlineCapMax} hours.`, `Absences of 30 minutes or more grant Seclusion Insight afterwards.`, `<b>Each full hour away, up to ${G.P.offlineFindsMax}: ${pct1(G.offlineFindOdds().item)} chance of an artifact, ${pct1(G.offlineFindOdds().egg)} of an egg, at your luck.</b>`], WD.LORE.seclusion)}><h2>Seclusion ${zh('闭关')}</h2><b>${pct(G.offlineRate())} income, ${fmt(G.offlineCapHours())} hours</b></div>
           <div class="dim small">When you leave, you keep cultivating without aging. Your abode, sect stipend and active missions keep paying too.</div>
           <div class="small ${hunt ? 'good' : 'dim'}">${hunt ? `If you left now, you would hunt in ${D.REGIONS[S.region].name} and defeat about ${fmt(hunt.killsPerSec * G.offlineRate() * 3600)} foes an hour.` : S.hunting ? 'This hunt is too deadly to continue without you. Choose a safer region before leaving.' : 'Begin hunting before you leave to keep fighting while away.'}</div></div>`;
       const site = D.SITES[S.abodeSite];
       const siteRow = row(`<div class="title">${zh(site.zh)} ${site.name} <span class="dim small">×${site.mult} to all buildings</span></div><div class="dim small">Rolled each life. Survey for a better site. Only a better one is kept.</div>`, S.abodeSite < D.SITES.length - 1 ? btn(`Survey ${fmt(G.surveyCost())} stones`, 'survey', S.stones >= G.surveyCost()) + shortLink({ stones: G.surveyCost() }) : '<span class="good small">Finest site</span>', '', tip('Cave sites', ladderLines('sites', D.SITES, S.abodeSite), 'Feng shui, "wind and water", is the art of reading land for the flow of Qi.'));
       return away + `<div class="section"><div><h2>Cave Abode ${zh('洞府')}</h2><div class="dim small">Your home in the mountains. It works for you while you fight.</div></div>${siteRow}${rows}</div>
         <div class="section"><div class="kv"><h2>Spirit Beast ${zh('灵兽')}</h2><span class="dim small">${S.eggs} eggs</span></div>${beast}
-          <div class="toolbar">${btn('Hatch an egg', 'hatch', S.eggs > 0, 'primary')}</div>
+          <div class="toolbar">${btn('Hatch an egg', 'hatch', S.eggs > 0, 'primary', tip('Beast grade odds', ['At your luck and best region. A new beast replaces yours only if its grade is at least as high.', ...G.gradeOdds(G.bestRegion(), 2).map((o, i) => (o ? `<span class="kv"><span>${D.RARITIES[i].name}</span><span>${pct1(o)}${S.beast && i >= S.beast.rarity ? ' · replaces' : ''}</span></span>` : '')).filter(Boolean)]))}</div>
           <div class="dim small">A new beast replaces your companion only if its grade is at least as high.</div></div>`;
     },
 
@@ -464,7 +503,7 @@
         if (t.reward.stones) parts.push('stones');
         if (t.reward.herbs) parts.push('herbs');
         if (t.reward.item) parts.push(`${pct(t.reward.item)} artifact`);
-        return row(`<div class="title"><span class="chip gold">${D.MISSION_RANKS[b.rank || 0].name}</span> ${t.name}</div><div class="dim small">${t.dur}s · ${pct(G.missionChance(t, undefined, b.rank || 0))} success · ${parts.join(', ')}</div>`, btn('Accept', `mission:${b.id}`, free), '', tip(`Rank ${D.MISSION_RANKS[b.rank || 0].name}: ${t.name}`, ['Higher ranks pay more but succeed less often. Luck and your sect rank improve what gets posted.', ...ladderLines('missions', D.MISSION_RANKS, b.rank || 0, s.rank * 0.4), `Mission speed ×${G.mods().mission.toFixed(2)}.`, 'Rewards were set when this posting went up, and grow 13% per stage.']));
+        return row(`<div class="title"><span class="chip gold">${D.MISSION_RANKS[b.rank || 0].name}</span> ${t.name}</div><div class="dim small">${t.dur}s · ${pct(G.missionChance(t, undefined, b.rank || 0))} success · ${parts.join(', ')}</div>`, btn('Accept', `mission:${b.id}`, free), '', tip(`Rank ${D.MISSION_RANKS[b.rank || 0].name}: ${t.name}`, [`<b>Your chance of success: ${pct1(G.missionChance(t, undefined, b.rank || 0))}</b>`,'Higher ranks pay more but succeed less often. Luck and your sect rank improve what gets posted.', ...ladderLines('missions', D.MISSION_RANKS, b.rank || 0, s.rank * 0.4), `Mission speed ×${G.mods().mission.toFixed(2)}.`, 'Rewards were set when this posting went up, and grow 13% per stage.']));
       }).join('');
       const shop = G.treasury().map((it) => {
         const locked = s.rank < (it.unlockRank || 0);
@@ -492,7 +531,7 @@
         const grade = G.bestPillGrade(p.id);
         const left = `<div class="title">${zh(p.zh)} ${p.name} <span class="dim small">× ${have}</span></div><div class="dim small">${p.desc}</div>`
           + (locked ? `<div class="small dim">Opens at ${D.REALMS[G.realmOf(p.stage)].name} stage ${G.stageInRealm(p.stage) + 1}.</div>` : `<div class="small">${costText(c)} · ${pct(G.pillChance(p))} success</div>`);
-        return row(left, btn('Refine', `refine:${p.id}`, !locked && G.canAfford(c)) + btn(`Consume${grade >= 0 ? ` ${D.PILL_GRADES[grade].name}` : ''}`, `use:${p.id}`, have > 0) + (locked ? '' : shortLink(c)), locked ? 'locked' : '', tip(`${p.zh} ${p.name}`, [`Base success ${pct(p.chance)}. Alchemy level adds 1% per level:`, ...sourceLines('alch'), 'Luck raises the chance of a perfect double pill.', 'Every pill rolls a grade, and the best in stock is used first. Alchemy level nudges the curve up:', ...ladderLines('pills', D.PILL_GRADES, G.bestPillGrade(p.id), G.alchLevel() * 0.05)], WD.LORE.pills[p.id]));
+        return row(left, btn('Refine', `refine:${p.id}`, !locked && G.canAfford(c)) + btn(`Consume${grade >= 0 ? ` ${D.PILL_GRADES[grade].name}` : ''}`, `use:${p.id}`, have > 0) + (locked ? '' : shortLink(c)), locked ? 'locked' : '', tip(`${p.zh} ${p.name}`, [`<b>Your success chance: ${pct1(G.pillChance(p))}</b>. Of successes, ${pct1(G.perfectChance())} come out as two perfect pills.`, p.id === 'marrow' ? `<b>Chance this pill improves your root: ${pct1(G.rootImproveChance())}</b>` : '', `Base success ${pct(p.chance)}. Alchemy level adds 1% per level:`, ...sourceLines('alch'), 'Luck raises the chance of a perfect double pill.', 'Every pill rolls a grade, and the best in stock is used first. Alchemy level nudges the curve up:', ...ladderLines('pills', D.PILL_GRADES, G.bestPillGrade(p.id), G.alchLevel() * 0.05)], WD.LORE.pills[p.id]));
       }).join('');
       return `<div class="section"><div class="kv"><h2>Pill Furnace</h2><span class="dim small">Alchemy level ${G.alchLevel()}</span></div>
         <div class="dim small">Every attempt trains your hand. Fortune sometimes yields two perfect pills.</div>${rows}</div>`;
@@ -501,10 +540,10 @@
     fate() {
       const S = G.S;
       const f = S.lastFortune === null ? null : D.FORTUNES[S.lastFortune];
-      const odds = D.FORTUNES.map((x) => `<span class="chip"${tip(`${x.zh} ${x.name}`, [`${fxText(x.fx)} for ${x.secs}s.`, `${x.weight}% of draws at no luck.`], x.text)}>${zh(x.zh)} ${x.name}</span>`).join('');
+      const odds = D.FORTUNES.map((x) => `<span class="chip"${tip(`${x.zh} ${x.name}`, [`${fxText(x.fx)} for ${x.secs}s.`, `<b>${pct1(G.fortuneOdds()[D.FORTUNES.indexOf(x)])} of draws at your luck</b> (${x.weight}% with none).`], x.text)}>${zh(x.zh)} ${x.name}</span>`).join('');
       return `<div class="section"><h2${tip('Temple of the Bamboo Sticks', 'Each stick is numbered. The priest reads your fortune from the first to fall.', WD.LORE.fortunes)}>Temple of the Bamboo Sticks</h2>
           <div class="dim small">Shake the cylinder and let one stick fall. Its fortune lasts a few minutes and replaces the last. Luck tilts the draw, but calamity is always possible.</div>
-          <div class="toolbar">${btn(`Draw a stick · ${fmt(G.divineCost())} stones`, 'divine', S.stones >= G.divineCost(), 'primary')}</div>
+          <div class="toolbar">${btn(`Draw a stick · ${fmt(G.divineCost())} stones`, 'divine', S.stones >= G.divineCost(), 'primary', tip('Odds at your luck', D.FORTUNES.map((x, i) => `<span class="kv"><span>${x.zh} ${x.name}</span><span>${pct1(G.fortuneOdds()[i])}</span></span>`)))}</div>
           ${f ? `<div class="row"><div><div class="fortune ${S.lastFortune <= 1 ? 'ill' : ''}">${f.zh}</div><div class="title">${f.name}</div><div class="small">${f.text}</div><div class="small dim">${fxText(f.fx)} for ${f.secs}s</div></div><div></div></div>` : ''}
           <div class="chips">${odds}</div></div>
         <div class="section"><h2>Your Luck</h2><div class="kv"${tip('Luck', ['Where your luck comes from:', ...sourceLines('luck')])}><span>Current luck</span><b>${fmt(G.mods().luck)}</b></div>
@@ -772,6 +811,13 @@
     enc: (v) => { const r = G.chooseEncounter(+v); if (r) lastEncounterText = r.text; },
     tech: (v) => G.buyTech(v),
     contemplate: (v) => G.contemplate(v),
+    art: (v) => G.buyIdleArt(v),
+    bagUp: () => G.upgradeBag(),
+    vaultUp: () => G.upgradeVault(),
+    lock: (v) => G.toggleLock(+v),
+    dismantle: (v) => G.dismantle(+v),
+    vaultIn: (v) => G.storeInVault(+v),
+    vaultOut: (v) => G.takeFromVault(+v),
     reforge: (v) => G.reforge(v),
     temper: (v) => G.temperMeridian(+v),
     survey: () => G.surveySite(),
@@ -830,12 +876,15 @@
   document.addEventListener('click', (e) => {
     const b = e.target.closest('[data-a]');
     if (!b || b.disabled) return;
-    const [name, arg] = b.getAttribute('data-a').split(':');
+    const [name, arg, arg2] = b.getAttribute('data-a').split(':');
+    if (name === 'pillT') { G.setPillTarget(arg, +arg2); render(); return; }
     if (ACTIONS[name]) { ACTIONS[name](arg); render(); }
   });
   document.addEventListener('change', (e) => {
     const k = e.target.getAttribute && e.target.getAttribute('data-t');
     if (k) G.S.settings[k] = e.target.checked;
+    const sel = e.target.getAttribute && e.target.getAttribute('data-s');
+    if (sel) { G.S.settings[sel] = +e.target.value; render(); }
   });
   document.addEventListener('keydown', (e) => {
     const tag = (e.target.tagName || '').toLowerCase();

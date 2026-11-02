@@ -43,7 +43,9 @@ Then visit http://localhost:8123.
 - **Caps and Perfection:** techniques, abode buildings, forging, beasts, the sect manual and meridians have level caps. Reaching one pays its own reward plus +1% to everything.
 - **Interconnected systems:** Beast Cores from combat feed pills, forging, deep meridians, the abode, beasts and sect donations. Each new realm asks for meridians, a region boss and a sect rank, and "The Path Ahead" links to the tab you need next.
 - **Rolled qualities:** spirit roots (12 grades), technique comprehension (12), pill grades (10), mission ranks (14), meridian purity (10), cave sites (12) and artifact condition (10) all roll on bell curves that rise with your realm and heavens, so rerolling stays worthwhile.
-- **Saves:** automatic saves in the browser and a copyable save string.
+- **Idle Arts:** 13 permanent automation upgrades bought with karma, each switchable: meridians, hunting ground, bosses, pill stock, abode, beasts, forging, encounters, rebirth, sect duties, major breakthroughs at a chosen odds threshold, auto-clearing low-grade artifacts, and an Ancestral Vault that keeps artifacts between lives.
+- **Storage:** an expandable storage ring (24 to 120 slots), item locks, and dismantling artifacts into Beast Cores.
+- **Saves:** automatic saves in the browser and a copyable save string. Script links carry a version stamp, so browsers always load matching files after an update.
 
 ## Project layout
 

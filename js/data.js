@@ -466,6 +466,7 @@ window.WD = window.WD || {};
     { id: 'tier15', name: 'Gift of the Golden Immortals', desc: 'Find a Golden Immortal-grade artifact.', test: (S) => S.stats.bestRarity >= 15 },
     { id: 'secluded', name: 'Ten Thousand Breaths', desc: 'Spend 100 hours in seclusion.', test: (S) => S.stats.secludedSeconds >= 360000 },
     { id: 'scholar', name: 'Scholar of the Dao', desc: 'Read 40 different entries by hovering over things.', test: (S) => Object.keys(S.lore || {}).length >= 40 },
+    { id: 'idleMaster', name: 'Effortless Action', desc: 'Learn every Idle Art.', test: (S) => Object.keys(S.idleArts || {}).length >= 13 },
     { id: 'tier23', name: 'Chaos Origin', desc: 'Find the highest grade of artifact.', test: (S) => S.stats.bestRarity >= 23 },
   );
 
@@ -533,9 +534,26 @@ window.WD = window.WD || {};
   );
 
 
+  // Idle Arts: permanent automation bought with karma. They survive rebirth and ascension.
+  const IDLE_ARTS = [
+    { id: 'meridian', name: 'Self-Opening Channels', zh: '自通经脉', cost: 6, setting: 'autoMeridian', desc: 'Opens the next meridian as soon as you can afford it.' },
+    { id: 'region', name: 'Hunter\'s Instinct', zh: '猎心', cost: 8, setting: 'autoRegion', desc: 'Moves your hunt to the toughest region and depth you can safely fight.' },
+    { id: 'boss', name: 'Challenge Seeker', zh: '求战', cost: 12, setting: 'autoBoss', desc: 'Summons the region boss when its meter is full and the fight looks winnable.' },
+    { id: 'pills', name: 'Furnace Spirit', zh: '炉灵', cost: 10, setting: 'autoPills', desc: 'Keeps your chosen pill stock refined. Takes Qi Gathering Pills when none are active, Bone-Mending when injured, and Foundation Pills before a breakthrough.' },
+    { id: 'abode', name: 'Diligent Caretaker', zh: '勤仆', cost: 12, setting: 'autoAbode', desc: 'Builds the cheapest abode upgrade once it costs under a fifth of your stones.' },
+    { id: 'beast', name: 'Beast Keeper', zh: '驯兽师', cost: 10, setting: 'autoBeast', desc: 'Hatches eggs and feeds your companion from spare herbs.' },
+    { id: 'forge', name: 'Tireless Smith', zh: '铸灵', cost: 18, setting: 'autoForge', desc: 'Forges equipped artifacts whenever you have plenty of stones and cores to spare.' },
+    { id: 'fate', name: 'Hand of Fate', zh: '天意', cost: 8, setting: 'autoFate', desc: 'Resolves encounters you leave waiting for 20 seconds, picking the likeliest good outcome.' },
+    { id: 'rebirth', name: 'Turning Wheel', zh: '轮转', cost: 20, setting: 'autoRebirth', desc: 'Reincarnates for you when a life ends and accepts the new spirit root.' },
+    { id: 'sect', name: 'Sect Loyalty', zh: '归宗', cost: 10, setting: 'autoSect', desc: 'Rejoins your last sect in each new life, accepts the best missions, and donates spare cores when a realm needs a higher rank.' },
+    { id: 'major', name: 'Unwavering Heart', zh: '坚心', cost: 16, setting: 'autoMajorArt', desc: 'Attempts major breakthroughs on its own when your odds reach the threshold you set, and never while injured.' },
+    { id: 'salvage', name: 'Ring Steward', zh: '戒灵', cost: 6, setting: null, desc: 'Unlocks automatic selling or dismantling of artifacts below a chosen grade.' },
+    { id: 'vault', name: 'Ancestral Vault', zh: '祖库', cost: 15, setting: null, desc: 'A vault whose artifacts survive rebirth. Starts with 2 slots.' },
+  ];
+
   WD.DATA = {
     STAGES_PER_REALM, REALMS, HEAVENS, HEAVEN_ZH, ROOT_TIERS, ELEMENTS, VARIANTS, QI_TECHS, ATK_TECHS, HP_TECHS,
     SECTS, SECT_RANKS, MISSIONS, REGIONS, RARITIES, GEAR_SLOTS, GEAR_ADJ, AFFIXES, PILLS, FORTUNES, ENCOUNTERS,
-    ENCOUNTER_BUFFS, KARMA_UPS, DAO_UPS, FEATS, SKILLS, SECT_SKILLS, RIVALS, TITLES, MERIDIANS, MASTERY, ABODE, BEASTS, MAX_DEPTH, COMPREHENSION, PILL_GRADES, MISSION_RANKS, PURITY, SITES, SKILL_RANKS, BEAST_STAGES, FOE_AFFIXES, CONDITIONS,
+    ENCOUNTER_BUFFS, KARMA_UPS, DAO_UPS, FEATS, SKILLS, SECT_SKILLS, RIVALS, TITLES, MERIDIANS, MASTERY, ABODE, BEASTS, MAX_DEPTH, COMPREHENSION, PILL_GRADES, MISSION_RANKS, PURITY, SITES, SKILL_RANKS, BEAST_STAGES, FOE_AFFIXES, CONDITIONS, IDLE_ARTS,
   };
 })();
