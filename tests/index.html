@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Nine Heavens Pacing Test</title></head>
+<body style="font: 14px monospace; background: #0e1a1a; color: #ece6d3; padding: 16px">
+  <h1>Pacing test</h1>
+  <p>A bot plays three simulated runs through the real game rules. No saves are touched.</p>
+  <pre id="out">Running...</pre>
+  <script src="../js/data.js"></script>
+  <script src="../js/core.js"></script>
+  <script src="bot.js"></script>
+  <script>
+    setTimeout(function () {
+      const results = [1, 2, 3].map((seed) => WD.runBot({ seed, maxSeconds: 24 * 3600, stopAfterAscensions: 1 }));
+      window.results = results;
+      document.getElementById('out').textContent = JSON.stringify(results, null, 1);
+    }, 50);
+  </script>
+</body>
+</html>
