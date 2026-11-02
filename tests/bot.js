@@ -52,15 +52,39 @@
         if (!next || !G.buyTech(next.id)) break;
       }
 
-      // Hunt the toughest region that a fight would not kill us in.
+      // Hunt the toughest region and depth that a fight would not kill us in.
       const st = G.stats();
-      let target = 0;
+      const safe = (r) => r.dmg * Math.ceil(r.hp * 1.2 / st.atk) < st.hp * 0.6;
+      let target = 0, depth = 0;
       for (let i = 0; i <= G.bestRegion(); i++) {
-        const r = G.regionStats(i);
-        if (r.dmg * Math.ceil(r.hp * 1.2 / st.atk) < st.hp * 0.6) target = i;
+        for (let d = 0; d <= (S.maxDepth[i] || 0); d++) if (safe(G.foeStats(i, d))) { target = i; depth = d; }
       }
-      if (S.region !== target) G.setRegion(target);
+      if (!S.fight) {
+        if (S.region !== target) G.setRegion(target);
+        if (S.depth !== depth) G.setDepth(depth);
+      }
       if (!S.hunting) G.setHunting(true);
+
+      // Fight like a decent player: use every skill, guard most charged blows, summon bosses we can beat.
+      if (S.foe && S.foe.charging > 0 && S.foe.charging < 1.5 && !S.fight) G.useSkill('guard');
+      else if (S.foe && S.foe.charging > 0 && S.foe.charging < 1.5) G.useSkill('guard');
+      for (const id of G.skillList()) if (id !== 'guard') G.useSkill(id);
+      G.strike();
+      const bossSafe = (() => { const r = G.foeStats(S.region, S.depth); return r.hp * G.P.bossHp / (st.atk * 3) < 60 && r.dmg * G.P.bossDmg * 15 < st.hp; })();
+      if (G.canSummonBoss() && bossSafe) G.summonBoss();
+      const towerFoeHp = 28 * Math.pow(G.P.towerStep, S.towerBest + 1);
+      if (!S.fight && S.recover <= 0 && t % 300 === 0 && towerFoeHp / (st.atk * 3) < 25) G.enterTower();
+      if (!S.fight && S.recover <= 0 && S.duelsWon < D.RIVALS.length && S.stage >= G.rivalStage(S.duelsWon)) {
+        const r = G.foeStats(Math.floor(S.duelsWon * 1.6), 0);
+        if (r.hp * 10 / (st.atk * 3) < 60 && r.dmg * 1.8 * 15 < st.hp) G.challengeRival(S.duelsWon);
+      }
+
+      // Meridians, abode and beast.
+      if (S.meridians < D.MERIDIANS.length && S.stage >= S.meridians * 4 && S.qi > G.meridianCost(S.meridians) * 3) G.openMeridian();
+      for (const a of D.ABODE) if (S.stones > G.abodeCost(a) * 3) G.buildAbode(a.id);
+      if (S.eggs > 0) G.hatchEgg();
+      if (S.beast && S.herbs > G.beastFeedCost() * 4) G.feedBeast();
+      for (const slot in S.gear) if (S.gear[slot] && S.stones > G.forgeCost(S.gear[slot]) * 6 && (S.gear[slot].plus || 0) < 10) G.forge(slot);
 
       if (!S.sect && S.stage >= G.sectJoinStage) G.joinSect(sectId);
       if (S.sect) {
@@ -96,7 +120,7 @@
       check('tick');
     }
     const S = G.S;
-    out.end = { t, stage: S.stage, best: S.best, lives: S.stats.lives, karma: S.karma, dao: S.daoMarks, asc: S.ascensions, feats: Object.keys(S.feats).length, deviations: S.stats.deviations, tribs: S.stats.tribs, S0ok: !!S0 };
+    out.end = { t, stage: S.stage, best: S.best, lives: S.stats.lives, karma: S.karma, dao: S.daoMarks, asc: S.ascensions, feats: Object.keys(S.feats).length, deviations: S.stats.deviations, tribs: S.stats.tribs, trophies: Object.keys(S.trophies).length, tower: S.towerBest, duels: S.duelsWon, bestRarity: S.stats.bestRarity, fame: S.fame, S0ok: !!S0 };
     return out;
   }
   WD.runBot = runBot;

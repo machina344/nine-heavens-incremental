@@ -11,9 +11,20 @@
   const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const TABS = [
-    ['cultivate', 'Techniques'], ['hunt', 'Hunt'], ['sect', 'Sect'], ['alchemy', 'Alchemy'],
-    ['fate', 'Fate'], ['rebirth', 'Rebirth'], ['records', 'Records'],
+    ['cultivate', 'Cultivate'], ['combat', 'Combat'], ['gear', 'Artifacts'], ['sect', 'Sect'], ['alchemy', 'Alchemy'],
+    ['abode', 'Abode'], ['fate', 'Fate'], ['rebirth', 'Rebirth'], ['records', 'Records'],
   ];
+  const TAB_NOTES = {
+    cultivate: 'Techniques and meridians: the slow, steady heart of your power.',
+    combat: 'Fight for stones, artifacts, fame and trophies. Number keys cast skills and space strikes.',
+    gear: 'Your artifacts, forging and the ladder of 24 grades.',
+    sect: 'Join a sect for bonuses, a signature art, missions and a treasury.',
+    alchemy: 'Refine herbs into pills. Practice improves your success rate.',
+    abode: 'Your cave home and spirit beast companion.',
+    fate: 'Fortune sticks, luck, and the encounters that find you.',
+    rebirth: 'Karma, ascension and the Tree of the Dao.',
+    records: 'Your annals, feats, the Codex and your save.',
+  };
   let tab = 'cultivate';
   let trib = null;        // Tribulation currently playing: { ev, shown, done }
   let confirmWipe = false;
@@ -44,10 +55,23 @@
   }
 
   // ---------- small view helpers ----------
-  const btn = (label, action, on, cls) => `<button type="button" data-a="${action}" class="${cls || ''}"${on === false ? ' disabled' : ''}>${label}</button>`;
+  // A tooltip is an attribute holding escaped HTML: title, body lines, and optional italic lore.
+  function tip(title, lines, lore) {
+    const body = (Array.isArray(lines) ? lines : [lines]).filter(Boolean).map((l) => `<div>${l}</div>`).join('');
+    const html = `<b>${title}</b>${body}${lore ? `<i>${lore}</i>` : ''}`;
+    return ` data-tip="${esc(html)}" tabindex="0"`;
+  }
+  const signed = (v, add, pctAdd) => (add ? `${v >= 0 ? '+' : ''}${pctAdd ? `${(v * 100).toFixed(1)}%` : fmt(v)}` : `×${v >= 100 ? fmt(v) : v.toFixed(2)}`);
+  function sourceLines(key) {
+    const add = key === 'luck' || key === 'bt' || key === 'alch';
+    const list = G.modSources(key);
+    if (!list.length) return ['<span class="dim">No bonuses yet.</span>'];
+    return list.map(([l, v]) => `<span class="kv"><span>${l}</span><span>${signed(v, add, key !== 'luck')}</span></span>`);
+  }
+  const btn = (label, action, on, cls, tp) => `<button type="button" data-a="${action}" class="${cls || ''}"${on === false ? ' disabled' : ''}${tp || ''}>${label}</button>`;
   const bar = (frac, cls) => `<div class="bar ${cls || ''}"><i style="width:${Math.max(0, Math.min(100, frac * 100)).toFixed(1)}%"></i></div>`;
   const zh = (t) => `<span class="zh">${t}</span>`;
-  const row = (left, right, cls) => `<div class="row ${cls || ''}"><div>${left}</div><div class="actions">${right}</div></div>`;
+  const row = (left, right, cls, tp) => `<div class="row ${cls || ''}"><div${tp || ''}>${left}</div><div class="actions">${right}</div></div>`;
   function costText(c) {
     const out = [];
     if (c.qi) out.push(`${fmt(c.qi)} Qi`);
@@ -56,7 +80,7 @@
     return out.join(' + ');
   }
   function fxText(fx) {
-    const L = { qi: 'Qi', atk: 'attack', hp: 'vitality', stones: 'stones', herbs: 'herbs', luck: 'luck', bt: 'breakthrough', alch: 'alchemy', trib: 'tribulation resistance', mission: 'mission speed', dev: 'deviation', life: 'lifespan' };
+    const L = { qi: 'Qi', atk: 'attack', hp: 'vitality', stones: 'stones', herbs: 'herbs', luck: 'luck', bt: 'breakthrough', alch: 'alchemy', trib: 'tribulation resistance', mission: 'mission speed', dev: 'deviation', life: 'lifespan', beast: 'companion power' };
     return Object.keys(fx).map((k) => {
       const v = fx[k];
       if (k === 'luck') return `${v > 0 ? '+' : ''}${v} luck`;
@@ -65,12 +89,64 @@
   }
   function stageLabel(stage) { return `Stage ${G.stageInRealm(stage) + 1} of ${D.STAGES_PER_REALM}`; }
 
+  // ---------- tooltips with knowledge ----------
+  function realmTip(i) {
+    const r = D.REALMS[i];
+    const next = D.REALMS[i + 1];
+    const cap = G.realmOf(G.maxStage());
+    return tip(`${r.zh} ${r.name}`, [
+      `Realm ${i + 1} of ${D.REALMS.length}. Base lifespan ${fmt(r.life)} years.`,
+      next ? (i + 1 > cap ? `${next.name} is sealed until you ascend again.` : `Next: ${next.name} (${next.zh}), ${fmt(next.life)} years.`) : 'There is nothing above this realm.',
+    ], WD.LORE.realms[i]);
+  }
+  function rootTip() {
+    const S = G.S;
+    const t = D.ROOT_TIERS[S.root.tier];
+    const odds = D.ROOT_TIERS.map((x) => `<span class="kv"><span>${x.name}</span><span>${x.weight}% · Qi ×${x.mult}</span></span>`);
+    return tip(`${t.zh} ${G.rootName(S.root)}`, [`Elements: ${S.root.elements.map((e) => G.elementInfo(e).name).join(', ')}.`, 'Fewer elements means purer Qi. Odds with no luck:', ...odds, 'Luck tilts the roll. A Marrow Washing Pill can reroll it.']);
+  }
+  function titleTip() {
+    const S = G.S;
+    const now = G.titleIndex();
+    const list = D.TITLES.map((x, i) => `<span class="kv ${i === now ? 'good' : i > now ? 'dim' : ''}"><span>${i > now + 1 ? '???' : x.name}</span><span>${fmt(x.need)}</span></span>`);
+    return tip('Fame in the jianghu', [`You have ${fmt(S.fame)} fame.`, 'Each title gives +1 luck and +10% stones. Bosses, duels, the Tower and bold choices earn fame.', ...list]);
+  }
+  function elementChip(e) {
+    const i = G.elementInfo(e);
+    return `<span class="chip"${tip(`${i.zh} ${i.name}`, `Strengthens ${i.desc}. A purer root gives it more.`, WD.LORE.elements[e])}>${zh(i.zh)} ${i.name}: ${i.desc}</span>`;
+  }
+  function gradeLore(i) {
+    let text = '';
+    for (const [from, t] of WD.LORE.families) if (i >= from) text = t;
+    return text;
+  }
+  function itemTip(it) {
+    const S = G.S;
+    const r = D.RARITIES[it.rarity];
+    const cur = S.gear[it.slot];
+    const lines = [
+      `${D.GEAR_SLOTS[it.slot].name} from ${D.REGIONS[it.region].name}. Grade ${it.rarity + 1} of ${D.RARITIES.length}, ×${fmt(r.mult)} base power.`,
+      it.plus ? `Forged +${it.plus}: ${Math.round(it.plus * 20)}% more power.` : 'Not yet forged.',
+    ];
+    if (cur && cur.id !== it.id) lines.push(`Score ${fmt(G.itemScore(it))} against ${fmt(G.itemScore(cur))} for your ${esc(cur.name)}.`);
+    lines.push(`Sells for ${fmt(G.itemValue(it) * G.mods().stones)} stones.`);
+    return tip(`${r.zh} ${r.name} ${esc(it.name)}`, lines, gradeLore(it.rarity));
+  }
+  function techTip(t) {
+    const lv = G.techLevel(t.id);
+    const mi = G.masteryIndex(lv);
+    const ladder = D.MASTERY.map((x, i) => `<span class="kv ${i === mi ? 'good' : i > mi ? 'dim' : ''}"><span>${x.zh} ${x.name}</span><span>Lv ${x.level}</span></span>`);
+    const unit = t.type === 'qi' ? 'Qi/s' : t.type === 'atk' ? 'attack' : 'vitality';
+    return tip(`${t.zh} ${t.name}`, [`Provides ${fmt(G.techPower(t))} base ${unit}. Each level costs 20% more than the last.`, `Each mastery tier multiplies this technique by ${G.P.masteryStep}:`, ...ladder]);
+  }
+  const buffTip = (b) => tip(esc(b.name), [fxText(b.fx), `${Math.ceil(b.t)} seconds left.`]);
+
   // ---------- left column ----------
   function renderIdentity() {
     const S = G.S;
     const r = D.REALMS[G.realmOf(S.stage)];
     document.documentElement.style.setProperty('--realm', r.color);
-    morph($('identity'), `<div class="realm-name">${r.zh}</div><div class="realm-en">${r.name}</div><div class="dim small">${stageLabel(S.stage)} · ${esc(G.rootName(S.root))}</div>`);
+    morph($('identity'), `<div${realmTip(G.realmOf(S.stage))}><div class="realm-name">${r.zh}</div><div class="realm-en">${r.name}</div></div><div class="dim small">${stageLabel(S.stage)} · <span${rootTip()}>${esc(G.rootName(S.root))}</span></div><div class="small"${titleTip()}>${zh(D.TITLES[G.titleIndex()].zh)} ${D.TITLES[G.titleIndex()].name}</div>`);
     const h = Math.min(S.ascensions, D.HEAVENS.length - 1);
     morph($('heaven'), `${zh(D.HEAVEN_ZH[h])} ${D.HEAVENS[h]}${S.ascensions > 9 ? ` +${S.ascensions - 9}` : ''} · Life ${S.stats.lives}`);
   }
@@ -85,14 +161,14 @@
     let main;
     if (S.ascendReady) main = btn('Ascend to the next heaven', 'askAscend', true, 'primary big');
     else if (major) {
-      const nextTrib = S.stage >= G.MAX_STAGE || G.realmOf(S.stage + 1) >= G.TRIB_FROM_REALM;
-      main = btn(`${S.stage >= G.MAX_STAGE ? 'Face the final tribulation' : 'Attempt breakthrough'} · ${pct(G.btChance(m))}${nextTrib ? ' + lightning' : ''}`, 'advance', G.canAttempt(), 'primary big');
-    } else main = btn('Advance to next stage', 'advance', G.canAttempt(), 'big');
+      const nextTrib = S.stage >= G.maxStage() || G.realmOf(S.stage + 1) >= G.TRIB_FROM_REALM;
+      main = btn(`${S.stage >= G.maxStage() ? 'Face the ascension tribulation' : 'Attempt breakthrough'} · ${pct(G.btChance(m))}${nextTrib ? ' + lightning' : ''}`, 'advance', G.canAttempt(), 'primary big', tip('Major breakthrough', [`Base chance ${pct(Math.max(0.3, 0.8 - G.realmOf(S.stage) * 0.06))}. Falls 6% per realm, never below 30%.`, ...sourceLines('bt'), S.btBonus ? `Foundation Pills: +${pct(S.btBonus)}` : '', 'Failure costs 40% of the Qi and injures you for 30 seconds or so. Lightning that defeats you costs 50% and 5 years.'], 'Clouds gather first. Elders say to bring an umbrella. It does not help.'));
+    } else main = btn('Advance to next stage', 'advance', G.canAttempt(), 'big', tip('Minor stage', [`Costs ${fmt(cost)} Qi and never fails.`, `Stage ${G.stageInRealm(S.stage) + 1} of ${D.STAGES_PER_REALM}. The ninth stage needs a major breakthrough.`]));
 
     const chips = [];
     if (S.injury > 0) chips.push(`<span class="chip warn">Injured ${Math.ceil(S.injury)}s: half Qi</span>`);
     if (S.btBonus > 0) chips.push(`<span class="chip gold">Breakthrough +${pct(S.btBonus)}</span>`);
-    for (const b of S.buffs) chips.push(`<span class="chip ${b.fx.qi < 0 || b.fx.stones < 0 ? 'warn' : ''}" title="${esc(fxText(b.fx))}">${esc(b.name)} ${Math.ceil(b.t)}s</span>`);
+    for (const b of S.buffs) chips.push(`<span class="chip ${b.fx.qi < 0 || b.fx.stones < 0 ? 'warn' : ''}"${buffTip(b)}>${esc(b.name)} ${Math.ceil(b.t)}s</span>`);
 
     const autos = [];
     if (S.karmaUps.autoStage) autos.push(toggle('autoStage', 'Auto stages'));
@@ -100,19 +176,19 @@
     if (S.dao.autoMajor) autos.push(toggle('autoMajor', 'Auto breakthrough'));
 
     morph($('status'), `<div class="stack">
-      <div class="kv"><span>Qi ${fmt(S.qi)} / ${fmt(cost)}</span><span class="dim small">${fmt(G.qiRate(m))}/s</span></div>
+      <div class="kv"${tip('Qi', [`${fmt(cost)} Qi needed for the next stage. Clicking your dantian gives ${fmt(G.clickGain(m))}.`, `Stage bonus ×${fmt(Math.pow(G.P.stageQiBonus, S.stage))}, realm bonus ×${fmt(Math.pow(G.P.realmQiBonus, G.realmOf(S.stage)))}.`, ...sourceLines('qi')])}><span>Qi ${fmt(S.qi)} / ${fmt(cost)}</span><span class="dim small">${fmt(G.qiRate(m))}/s</span></div>
       ${bar(S.qi / cost)}
       ${main}
       ${autos.length ? `<div class="toolbar small">${autos.join('')}</div>` : ''}
-      <div class="kv small"><span>Age ${Math.floor(S.age)} of ${Math.floor(life)} years</span><span class="dim">1 month/s</span></div>
+      <div class="kv small"${tip('Lifespan', [`Realm grants ${fmt(D.REALMS[G.realmOf(S.stage)].life)} years. Pills and encounters changed that by ${S.bonusYears >= 0 ? '+' : ''}${fmt(S.bonusYears)}.`, 'One real second is one month. You do not age while away.', ...sourceLines('life')], 'To live ten thousand years is the only reason some ever begin.')}><span>Age ${Math.floor(S.age)} of ${Math.floor(life)} years</span><span class="dim">1 month/s</span></div>
       ${bar(S.age / life, 'age')}
-      <div class="kv small"><span>Vitality ${fmt(S.hp)} / ${fmt(st.hp)}</span><span class="dim">Attack ${fmt(st.atk)}</span></div>
+      <div class="kv small"><span${tip('Vitality', ['Your health in fights, and your shield against lightning. Grows 7% per stage.', ...sourceLines('hp'), 'Lightning resistance:', ...sourceLines('trib')])}>Vitality ${fmt(S.hp)} / ${fmt(st.hp)}</span><span class="dim"${tip('Attack', ['Damage per second before skills. Grows 7% per stage.', ...sourceLines('atk')])}>Attack ${fmt(st.atk)}</span></div>
       ${bar(S.hp / st.hp, 'hp')}
       <div class="res">
-        <div class="kv"><span>Stones</span><b>${fmt(S.stones)}</b></div>
-        <div class="kv"><span>Herbs</span><b>${fmt(S.herbs)}</b></div>
-        <div class="kv"><span>Karma</span><b>${fmt(S.karma)}</b></div>
-        <div class="kv"><span>Dao Marks</span><b>${fmt(S.daoMarks)}</b></div>
+        <div class="kv"${tip('Spirit Stones', ['The currency of cultivators: Qi crystallised in rock. Earned from fights, missions, your sect stipend and a stone vein.', ...sourceLines('stones')])}><span>Stones</span><b>${fmt(S.stones)}</b></div>
+        <div class="kv"${tip('Spirit Herbs', ['Used in alchemy and to feed spirit beasts. Foes, missions and an herb garden provide them.', ...sourceLines('herbs')])}><span>Herbs</span><b>${fmt(S.herbs)}</b></div>
+        <div class="kv"${tip('Karma', [`Dying now would earn ${fmt(G.karmaOnDeath())}. It depends on your highest stage this life, not your age.`, 'Spent on the Rebirth tab. Ascending resets karma upgrades.'], 'Every deed is a debt, and the wheel always collects.')}><span>Karma</span><b>${fmt(S.karma)}</b></div>
+        <div class="kv"${tip('Dao Marks', [`Earned only by ascending. Your next ascension gives ${fmt(G.daoOnAscend())}.`, 'They buy permanent upgrades and are never lost.'])}><span>Dao Marks</span><b>${fmt(S.daoMarks)}</b></div>
       </div>
       ${chips.length ? `<div class="chips">${chips.join('')}</div>` : ''}
     </div>`);
@@ -130,7 +206,8 @@
     const e = D.ENCOUNTERS[S.encounter.i];
     const buttons = e.choices.map((c, i) => {
       const cost = G.choiceCost(c);
-      return btn(`${c.label}${cost ? ` (${fmt(cost)} stones)` : ''}`, `enc:${i}`, G.canChoose(i));
+      const odds = Math.round(Math.min(0.98, c.chance + Math.max(-30, G.mods().luck) * 0.004) * 100);
+      return btn(`${c.label}${cost ? ` (${fmt(cost)} stones)` : ''}`, `enc:${i}`, G.canChoose(i), '', tip(c.label, c.chance >= 1 ? 'The outcome is certain.' : `About ${odds}% chance with your luck.`));
     }).join('');
     morph($('encounter'), `<div class="scroll-card"><h3>${zh(e.zh)} ${e.title}</h3><p class="small">${e.text}</p><div class="actions">${buttons}</div></div>`);
   }
@@ -139,9 +216,11 @@
     const S = G.S;
     const flag = {
       fate: !!S.encounter,
+      combat: G.canSummonBoss() || !!(S.foe && S.foe.charging > 0),
+      abode: S.eggs > 0,
       rebirth: S.karma >= 3 && D.KARMA_UPS.some((u) => (S.karmaUps[u.id] || 0) < u.max && S.karma >= G.karmaCost(u)),
     };
-    morph($('tabs'), TABS.map(([id, label]) => `<button type="button" data-a="tab:${id}" class="${tab === id ? 'on' : ''}">${label}${flag[id] ? ' <span class="dot">•</span>' : ''}</button>`).join(''));
+    morph($('tabs'), TABS.map(([id, label]) => `<button type="button" data-a="tab:${id}" class="${tab === id ? 'on' : ''}"${tip(label, TAB_NOTES[id])}>${label}${flag[id] ? ' <span class="dot">•</span>' : ''}</button>`).join(''));
   }
 
   function renderLog() {
@@ -159,44 +238,133 @@
         const rows = open.map((t) => {
           const c = G.techCost(t);
           const unit = type === 'qi' ? 'Qi/s' : type === 'atk' ? 'attack' : 'vitality';
-          return row(`<div class="title">${zh(t.zh)} ${t.name} <span class="dim small">Lv ${G.techLevel(t.id)}</span></div><div class="dim small">+${fmt(t.power)} base ${unit} per level</div>`,
-            btn(costText(c), `tech:${t.id}`, G.canAfford(c)));
+          const mi = G.masteryIndex(G.techLevel(t.id));
+          const nextM = D.MASTERY[mi + 1];
+          return row(`<div class="title">${zh(t.zh)} ${t.name} <span class="dim small">Lv ${G.techLevel(t.id)} · ${D.MASTERY[mi].name}</span></div><div class="dim small">+${fmt(t.power * Math.pow(G.P.masteryStep, mi))} base ${unit} per level${nextM ? ` · ×${G.P.masteryStep} at Lv ${nextM.level} (${nextM.name})` : ''}</div>`,
+            btn(costText(c), `tech:${t.id}`, G.canAfford(c)), '', techTip(t));
         }).join('');
         const lock = next ? `<div class="dim small">Next: ${next.name}, at ${D.REALMS[G.realmOf(next.unlock)].name} stage ${G.stageInRealm(next.unlock) + 1}.</div>` : '';
         return `<div class="section"><div><h2>${title}</h2><div class="dim small">${note}</div></div>${rows}${lock}</div>`;
-      }).join('');
+      }).join('') + meridianView();
     },
 
-    hunt() {
+    combat() {
       const S = G.S;
       const st = G.stats();
+      const foe = S.foe;
+      const f = S.fight;
+      let card;
+      if (S.recover > 0) card = `<div class="dim">Recovering for ${Math.ceil(S.recover)}s.</div>`;
+      else if (foe) {
+        const warn = foe.charging > 0 ? `<div class="charge">Charging a killing blow: ${foe.charging.toFixed(1)}s. Guard now!</div>` : foe.stun > 0 ? `<div class="good small">Stunned ${foe.stun.toFixed(1)}s</div>` : '<div class="small">&nbsp;</div>';
+        const tag = { elite: 'chip gold', champion: 'chip warn', boss: 'chip warn', duel: 'chip warn', tower: 'chip gold' }[foe.tier];
+        card = `<div class="kv"><b${tip(esc(foe.name), [{ normal: 'An ordinary foe. It pays little but fills the boss meter.', elite: 'Elites have 3× health, pay 4× stones and often drop artifacts. They charge killing blows.', champion: 'Champions have 7× health, pay 14× stones, and may carry a beast egg.', boss: 'A region lord: guaranteed high-grade drops. A first kill is permanent.', duel: 'A named master of the jianghu. Your record against them survives rebirth.', tower: 'A floor warden. Each floor is 50% tougher than the last.' }[foe.tier], `Charged blows hit for 5× and cost 50 Momentum. Guard turns one into a parry.`])}>${esc(foe.name)}</b>${tag ? `<span class="${tag}">${foe.tier}</span>` : ''}</div>
+          <div class="kv small"><span class="dim">Dealing ${fmt(foe.dmg)}/s</span><span>${fmt(Math.max(0, foe.hp))} / ${fmt(foe.maxHp)}</span></div>${bar(foe.hp / foe.maxHp, 'hp')}${warn}`;
+      } else card = `<div class="dim small">${S.hunting ? 'Searching for prey.' : 'You are at rest. Begin hunting to fight.'}</div>`;
+      const fightBar = f ? `<div class="kv small"><span class="good">${f.kind === 'tower' ? `Tower of Trials, floor ${f.floor}` : f.kind === 'duel' ? 'Martial Tournament' : 'Boss battle'}</span><span>${Math.ceil(f.t)}s left</span></div>` : '';
+      const skills = G.skillList().map((id, i) => {
+        const d = G.skillDef(id);
+        const cd = S.cds[id] || 0;
+        const hot = id === 'guard' && foe && foe.charging > 0;
+        return `<button type="button" data-a="skill:${id}" ${tip(`${d.zh} ${d.name}`, [d.desc, `Cooldown ${d.cd}s.`])} class="skill ${hot ? 'primary' : ''}"${cd > 0 || S.recover > 0 || !S.hunting ? ' disabled' : ''}><span class="zh">${d.zh}</span><span class="small">${cd > 0 ? `${Math.ceil(cd)}s` : `Key ${i + 1}`}</span></button>`;
+      }).join('');
+      const skillNotes = G.skillList().map((id) => { const d = G.skillDef(id); return `<div class="small"><b>${d.name}</b> <span class="dim">${d.desc}</span></div>`; }).join('');
+      const mi = G.miLevel();
+      const miToggles = (mi >= 5 ? toggle('autoSkills', 'Auto-cast attacks') : '<span class="dim small">Auto-cast at Martial Intent 5</span>') + (mi >= 15 ? toggle('autoGuard', 'Auto-guard') : '<span class="dim small">Auto-guard at 15</span>');
       const regions = D.REGIONS.map((r, i) => {
         const rs = G.regionStats(i);
         const open = S.stage >= rs.unlock;
         if (!open) return i === G.bestRegion() + 1 ? row(`<div class="title dim">${r.name}</div><div class="dim small">Opens at ${D.REALMS[G.realmOf(rs.unlock)].name} stage ${G.stageInRealm(rs.unlock) + 1}.</div>`, '', 'locked') : '';
-        const risk = rs.dmg * Math.ceil(rs.hp / st.atk) > st.hp ? '<span class="bad">Deadly</span>' : rs.hp / st.atk > 6 ? '<span class="dim">Slow</span>' : '<span class="good">Manageable</span>';
-        return row(`<div class="title">${zh(r.zh)} ${r.name}</div><div class="dim small">Foes ${fmt(rs.hp)} HP, ${fmt(rs.dmg)} dmg/s · ${fmt(rs.stones)} stones · ${risk}</div>`,
-          btn(S.region === i ? 'Selected' : 'Travel', `region:${i}`, S.region !== i), S.region === i ? 'done' : '');
-      }).join('');
-      const foe = S.foe;
-      const fight = S.recover > 0 ? `<div class="dim">Recovering for ${Math.ceil(S.recover)}s.</div>`
-        : foe ? `<div class="kv small"><span>${esc(foe.name)}</span><span>${fmt(Math.max(0, foe.hp))} HP</span></div>${bar(foe.hp / foe.maxHp, 'hp')}` : `<div class="dim small">${S.hunting ? 'Searching for prey.' : 'You are resting.'}</div>`;
+        const fs = G.foeStats(i, S.region === i ? S.depth : 0);
+        const risk = fs.dmg * Math.ceil(fs.hp / st.atk) > st.hp ? '<span class="bad">Deadly</span>' : fs.hp / st.atk > 6 ? '<span class="dim">Slow</span>' : '<span class="good">Manageable</span>';
+        return row(`<div class="title">${zh(r.zh)} ${r.name}</div><div class="dim small">Foes ${fmt(fs.hp)} HP, ${fmt(fs.dmg)} dmg/s · ${fmt(fs.stones)} stones · ${risk} · deepest ${(S.maxDepth[i] || 0) + 1} of ${D.MAX_DEPTH + 1}</div>`,
+          btn(S.region === i ? 'Here' : 'Travel', `region:${i}`, S.region !== i && !f), S.region === i ? 'done' : '', tip(`${r.zh} ${r.name}`, [`Foes: ${r.foes.join(', ')}.`, `Trophies here: ${Array.from({ length: D.MAX_DEPTH + 1 }, (_, d) => d).filter((d) => S.trophies[`${i}:${d}`]).length} of ${D.MAX_DEPTH + 1}.`], WD.LORE.regions[i]));
+      }).reverse().join('');
+      const depths = [];
+      for (let d = 0; d <= (S.maxDepth[S.region] || 0); d++) depths.push(btn(`${d + 1}`, `depth:${d}`, S.depth !== d && !f, S.depth === d ? 'on-depth' : '', tip(`Depth ${d + 1}`, [`Foe health ×${fmt(Math.pow(G.P.depthHp, d))}, damage ×${fmt(Math.pow(G.P.depthDmg, d))}, stones ×${fmt(Math.pow(G.P.depthStones, d))}.`, 'Deeper foes also roll higher grades and drop artifacts more often.', S.trophies[`${S.region}:${d}`] ? '<span class="good">Trophy earned.</span>' : 'Boss not yet slain at this depth.'])));
+      const rivals = D.RIVALS.slice(0, Math.min(D.RIVALS.length, S.duelsWon + 1)).map((rv, i) => {
+        const open = S.stage >= G.rivalStage(i);
+        const beaten = i < S.duelsWon;
+        return row(`<div class="title">${rv[0]}</div><div class="dim small">${rv[1]}${open ? '' : ` · needs ${D.REALMS[G.realmOf(G.rivalStage(i))].name}`}</div>`, btn(beaten ? 'Rematch' : 'Challenge', `rival:${i}`, open && !f && S.recover <= 0), beaten ? 'done' : open ? '' : 'locked', tip(`${rv[0]}, ${rv[1]}`, [`Rank ${i + 1} of ${D.RIVALS.length}. ${beaten ? 'Rematches pay far less fame.' : 'A first win pays triple fame and a treasure.'}`], WD.LORE.rivals[i]));
+      }).reverse().join('');
+      return `<div class="section foe-section"><div class="toolbar">
+            ${btn(S.hunting ? 'Stop fighting' : 'Begin hunting', 'hunt', true, S.hunting ? '' : 'primary')}
+            ${btn('Strike', 'strike', S.hunting && !!foe)}
+            ${f ? btn('Withdraw', 'flee', true, 'ghost') : ''}
+          </div>
+          ${fightBar}<div id="foe-card" class="foe-card stack">${card}</div>
+          <div class="kv small"${tip('Momentum', ['Normal hits add 4 and skills add 10. Parries add 35.', `Also raises crit chance: now ${Math.round(10 + S.momentum * 0.2)}%. Crits deal 2.5×.`, 'A blow you fail to guard costs 50. Falling loses it all.'])}><span>Momentum ${Math.floor(S.momentum)}</span><span class="dim">+${Math.floor(S.momentum)}% damage · +${Math.floor(S.momentum / 2)}% rewards</span></div>${bar(S.momentum / 100, 'gold')}
+          <div class="kv small"${tip('Kill streak', [`Best ever: ${S.stats.bestStreak}. Rewards rise 0.5% per kill, up to +100% at 200.`, 'Falling in battle resets it. Withdrawing does not.'])}><span>Kill streak ${S.streak}</span><span class="dim">+${Math.round(Math.min(S.streak, 200) / 2)}% rewards until you fall</span></div>
+          <div class="kv small"${tip('Guard', ['Blocks 70% of normal hits while active.', 'If a charged blow lands while you guard, you parry: 3× attack back, a 3 second stun and 1.5× reward on the kill.'])}><span>Guard ${S.guard > 0 ? `${S.guard.toFixed(1)}s` : 'down'}</span><span class="dim">Vitality ${fmt(S.hp)} / ${fmt(st.hp)}</span></div>
+          <div class="skills">${skills}</div>
+          <div class="toolbar small">${miToggles}</div></div>
+        <div class="section"><div class="kv"${tip('Martial Intent', [`${fmt(S.miXp)} intent. Level ${mi + 1} needs ${fmt(8 * (mi + 1) * (mi + 1))}.`, 'Tougher regions and foes teach more. It resets each life.', 'Auto-cast unlocks at level 5, auto-guard at level 15.'], 'The moment before a master moves, the opponent has already lost.')}><h2>Martial Intent ${zh('武意')}</h2><b>Level ${mi}</b></div>
+          <div class="dim small">Every kill sharpens you: +4% attack and vitality per level this life. ${Object.keys(S.trophies).length} boss trophies add +${G.P.trophyBonus * 100}% each, and Tower floors +${G.P.towerBonus * 100}% each, forever.</div></div>
+        <div class="section"><div class="kv"><h2>Region Boss</h2><span class="dim small">${S.bossMeter} of ${G.BOSS_METER} kills</span></div>
+          ${bar(S.bossMeter / G.BOSS_METER, 'gold')}
+          <div class="toolbar">${btn(`Summon the Lord of ${D.REGIONS[S.region].name}`, 'boss', G.canSummonBoss(), 'primary')}</div>
+          <div class="dim small">Bosses drop artifacts of guaranteed high grade. A first kill earns a trophy and opens the next depth, where foes and rewards both grow.</div>
+          <div class="toolbar"><span class="small">Depth</span>${depths.join('')}</div></div>
+        <div class="section"><h2>Regions</h2><div class="stack">${regions}</div></div>
+        <div class="section"><div class="kv"><h2>Tower of Trials ${zh('通天塔')}</h2><b>Best floor ${S.towerBest}</b></div>
+          <div class="dim small">Clear each floor in 30 seconds and climb until you fall. New floors pay stones and fame, and every 10th opens a treasure chest.</div>
+          <div class="toolbar">${btn(`Climb from floor ${S.towerBest + 1}`, 'tower', !f && S.recover <= 0, 'primary')}</div></div>
+        <div class="section"><div class="kv"><h2>Martial Tournament ${zh('华山论剑')}</h2><b>${S.duelsWon} of ${D.RIVALS.length} beaten</b></div>
+          <div class="dim small">Defeat the masters of the jianghu in order, for fame and treasure. Your record lasts through every life.</div>
+          <div class="stack">${rivals}</div></div>
+        <div class="section"><h2>Your Skills</h2>${skillNotes}</div>`;
+    },
+
+    gear() {
+      const S = G.S;
       const gear = Object.keys(D.GEAR_SLOTS).map((slot) => {
         const it = S.gear[slot];
-        return row(`<div class="small dim">${zh(D.GEAR_SLOTS[slot].zh)} ${D.GEAR_SLOTS[slot].name}</div>${it ? itemText(it) : '<div class="dim small">Empty</div>'}`, '');
+        const action = it ? btn(`Forge ${fmt(G.forgeCost(it))} · ${pct(G.forgeChance(it))}`, `forge:${slot}`, S.stones >= G.forgeCost(it)) : '';
+        return row(`<div class="small dim">${zh(D.GEAR_SLOTS[slot].zh)} ${D.GEAR_SLOTS[slot].name}</div>${it ? itemText(it) : '<div class="dim small">Empty</div>'}`, action, '', it ? itemTip(it) : tip(D.GEAR_SLOTS[slot].name, `Provides ${D.GEAR_SLOTS[slot].stat.toLowerCase()}. Nothing equipped yet.`));
       }).join('');
       const bag = S.bag.slice().sort((a, b) => b.rarity - a.rarity || G.itemScore(b) - G.itemScore(a)).map((it) => {
         const better = G.itemScore(it) > G.itemScore(S.gear[it.slot]);
         return row(`<div class="small dim">${D.GEAR_SLOTS[it.slot].name}${better ? ' · <span class="good">Upgrade</span>' : ''}</div>${itemText(it)}`,
-          btn('Equip', `equip:${it.id}`) + btn(`Sell ${fmt(G.itemValue(it) * G.mods().stones)}`, `sell:${it.id}`, true, 'ghost'));
+          btn('Equip', `equip:${it.id}`) + btn(`Sell ${fmt(G.itemValue(it) * G.mods().stones)}`, `sell:${it.id}`, true, 'ghost'), '', itemTip(it));
       }).join('');
-      return `<div class="section"><h2>The Hunt</h2>
-          <div class="toolbar">${btn(S.hunting ? 'Stop hunting' : 'Begin hunting', 'hunt', true, S.hunting ? '' : 'primary')}</div>${fight}
-          <div class="stack">${regions}</div></div>
-        <div class="section"><h2>Equipped</h2><div class="grid2">${gear}</div></div>
+      const seen = S.stats.bestRarity;
+      const ladder = D.RARITIES.map((r, i) => `<span class="grade ${r.shimmer && i <= seen ? 'shimmer' : ''}" style="color:${i <= seen ? r.color : 'var(--line)'}"${i <= seen ? tip(`${r.zh} ${r.name}`, [`Grade ${i + 1} of ${D.RARITIES.length}. Base power ×${fmt(r.mult)}.`, i === 0 ? '' : `${i <= 4 ? '' : `Up to ${1 + Math.floor(i / 5)} bonus stats. `}1.9× stronger than the grade below.`], gradeLore(i)) : tip('Undiscovered grade', 'Find one to learn its name.')}>${i <= seen ? r.zh : '?'}</span>`).join('');
+      return `<div class="section"><div class="kv"><h2>Grades Discovered</h2><span class="dim small">${seen + 1} of ${D.RARITIES.length}</span></div>
+          <div class="ladder">${ladder}</div>
+          ${(() => {
+            const c = G.gradeCurve(S.region, S.depth);
+            const name = (i) => D.RARITIES[i].name;
+            return `<div class="kv small"><span>Drops here: ${name(c.low)} to ${name(c.high)}</span><span class="dim">most often ${name(Math.round(c.centre))}</span></div>
+              <div class="kv small"${tip('Fate luck', [`Your luck of ${fmt(G.mods().luck)}, multiplied by ${fmt(G.mods().luck > 0 ? G.fateLuck() / G.mods().luck : 1)} for your realm and ascensions.`, 'Luck sources:', ...sourceLines('luck'), `Curve centre ${c.centre.toFixed(1)}, on the ladder of 24 grades. The luck part of it maxes out at ${G.P.gradeLuckCap} grades.`])}><span class="dim">Fate luck (luck boosted by realm and ascensions)</span><span>${fmt(G.fateLuck())}</span></div>`;
+          })()}
+          <div class="dim small">Each grade is 1.9× stronger than the one below. Your realm, region, depth, luck and ascensions raise the whole range, and grades below it stop dropping. Bosses and champions roll higher still.</div></div>
+        <div class="section"><h2>Equipped</h2><div class="stack">${gear}</div>
+          <div class="dim small">Each forge level adds +20% power. Failing above +10 costs a level.</div></div>
         <div class="section"><div class="kv"><h2>Storage Ring</h2><span class="dim small">${S.bag.length} of ${G.BAG_SIZE}</span></div>
           <div class="toolbar">${btn('Equip upgrades', 'equipBest', S.bag.length > 0)}${btn('Sell non-upgrades', 'sellBad', S.bag.length > 0, 'ghost')}${toggle('autoEquip', 'Auto-equip upgrades')}</div>
           <div class="stack">${bag || '<div class="dim small">Hunt, explore and take risks to find artifacts.</div>'}</div></div>`;
+    },
+
+    abode() {
+      const S = G.S;
+      const rows = D.ABODE.map((a) => {
+        const l = S.abode[a.id] || 0;
+        const maxed = a.max && l >= a.max;
+        return row(`<div class="title">${zh(a.zh)} ${a.name} <span class="dim small">Lv ${l}</span></div><div class="dim small">${a.desc}</div>`,
+          btn(maxed ? 'Complete' : `${fmt(G.abodeCost(a))} stones`, `build:${a.id}`, !maxed && S.stones >= G.abodeCost(a)), maxed ? 'done' : '', tip(`${a.zh} ${a.name}`, [a.desc, 'Each level costs 70% more, and prices rise with the regions you can reach. Abodes reset each life.']));
+      }).join('');
+      let beast = '<div class="dim small">No companion yet. Eggs come from bosses, champions and strange encounters.</div>';
+      if (S.beast) {
+        const sp = D.BEASTS.find((x) => x.id === S.beast.species);
+        const r = D.RARITIES[S.beast.rarity];
+        const power = G.beastPower(G.mods().beast);
+        const label = sp.fx === 'luck' ? `+${G.beastLuck(G.mods().beast)} luck` : `+${fmt(power * 100)}% ${{ qi: 'Qi', atk: 'attack', hp: 'vitality', stones: 'stones' }[sp.fx]}`;
+        beast = row(`<div class="title" style="color:${r.color}">${r.zh} · ${zh(sp.zh)} ${sp.name} <span class="dim small">Lv ${S.beast.level}</span></div><div class="dim small">${label}</div>`, btn(`Feed ${fmt(G.beastFeedCost())} herbs`, 'feed', S.herbs >= G.beastFeedCost()), '', tip(`${sp.zh} ${sp.name}`, [`Grade: ${r.name}. Each level adds 10% power and costs 35% more herbs to feed.`], WD.LORE.beasts[sp.id]));
+      }
+      return `<div class="section"><div><h2>Cave Abode ${zh('洞府')}</h2><div class="dim small">Your home in the mountains. It works for you while you fight.</div></div>${rows}</div>
+        <div class="section"><div class="kv"><h2>Spirit Beast ${zh('灵兽')}</h2><span class="dim small">${S.eggs} eggs</span></div>${beast}
+          <div class="toolbar">${btn('Hatch an egg', 'hatch', S.eggs > 0, 'primary')}</div>
+          <div class="dim small">A new beast replaces your companion only if its grade is at least as high.</div></div>`;
     },
 
     sect() {
@@ -205,7 +373,7 @@
         const can = S.stage >= G.sectJoinStage;
         return `<div class="section"><h2>Choose a Sect</h2>
           <div class="dim small">${can ? 'A wandering cultivator only goes so far. Choose carefully: leaving forfeits your rank.' : `Sects accept disciples from Qi Refining stage ${G.sectJoinStage + 1}.`}</div>
-          <div class="stack">${D.SECTS.map((x) => row(`<div class="title">${zh(x.zh)} ${x.name}</div><div class="small"><i>“${x.motto}”</i> ${x.desc}</div><div class="small good">${fxText(x.fx)}</div>`, btn('Join', `join:${x.id}`, can))).join('')}</div></div>`;
+          <div class="stack">${D.SECTS.map((x) => row(`<div class="title">${zh(x.zh)} ${x.name}</div><div class="small"><i>“${x.motto}”</i> ${x.desc}</div><div class="small good">${fxText(x.fx)}</div><div class="small"><span class="chip">${x.align}</span> ${zh(D.SECT_SKILLS[x.id].zh)} ${D.SECT_SKILLS[x.id].name}: <span class="dim">${D.SECT_SKILLS[x.id].desc}</span></div>`, btn('Join', `join:${x.id}`, can), '', tip(`${x.zh} ${x.name}`, [`${x.align} path. Bonuses grow 25% with every rank.`, `Signature art: cooldown ${D.SECT_SKILLS[x.id].cd}s.`], WD.LORE.sects[x.id]))).join('')}</div></div>`;
       }
       const s = S.sect;
       const sd = D.SECTS.find((x) => x.id === s.id);
@@ -222,16 +390,17 @@
         if (t.reward.stones) parts.push('stones');
         if (t.reward.herbs) parts.push('herbs');
         if (t.reward.item) parts.push(`${pct(t.reward.item)} artifact`);
-        return row(`<div class="title">${t.name}</div><div class="dim small">${t.dur}s · ${pct(G.missionChance(t))} success · ${parts.join(', ')}</div>`, btn('Accept', `mission:${b.id}`, free));
+        return row(`<div class="title">${t.name}</div><div class="dim small">${t.dur}s · ${pct(G.missionChance(t))} success · ${parts.join(', ')}</div>`, btn('Accept', `mission:${b.id}`, free), '', tip(t.name, [`Base success ${pct(t.chance)}, shifted by your luck.`, `Mission speed ×${G.mods().mission.toFixed(2)}.`, 'Rewards were set when this posting went up, and grow 13% per stage.']));
       }).join('');
       const shop = G.treasury().map((it) => {
         const locked = s.rank < (it.unlockRank || 0);
-        return row(`<div class="title">${it.name}</div><div class="dim small">${locked ? `Requires ${D.SECT_RANKS[it.unlockRank].name}.` : it.desc}</div>`, btn(`${fmt(it.cost)}`, `treasury:${it.id}`, !locked && s.contribution >= it.cost), locked ? 'locked' : '');
+        return row(`<div class="title">${it.name}</div><div class="dim small">${locked ? `Requires ${D.SECT_RANKS[it.unlockRank].name}.` : it.desc}</div>`, btn(`${fmt(it.cost)}`, `treasury:${it.id}`, !locked && s.contribution >= it.cost), locked ? 'locked' : '', tip(it.name, [it.desc, 'Treasury prices rise as you climb stages.']));
       }).join('');
       return `<div class="section"><h2>${zh(sd.zh)} ${sd.name}</h2>
-          <div class="kv"><span>${zh(rank.zh)} ${rank.name}</span><b>${fmt(s.contribution)} contribution</b></div>
+          <div class="kv"${tip('Sect ranks', ['Earn contribution through missions. A higher rank raises bonuses, stipend and mission slots.', 'A second mission slot opens at Core Disciple, a third at Elder.', ...D.SECT_RANKS.map((x, i) => `<span class="kv ${i === s.rank ? 'good' : i > s.rank ? 'dim' : ''}"><span>${x.zh} ${x.name}</span><span>${fmt(x.need)}</span></span>`)], WD.LORE.sects[s.id])}><span>${zh(rank.zh)} ${rank.name}</span><b>${fmt(s.contribution)} contribution</b></div>
           ${next ? `<div class="dim small">Next rank, ${next.name}: ${fmt(s.earned)} of ${fmt(next.need)} earned</div>${bar(s.earned / next.need, 'gold')}` : '<div class="good small">You lead the sect.</div>'}
-          <div class="small good">${fxText(sd.fx)} (rank bonus ×${(1 + 0.25 * s.rank).toFixed(2)})</div></div>
+          <div class="small good">${fxText(sd.fx)} (rank bonus ×${(1 + 0.25 * s.rank).toFixed(2)})</div>
+          <div class="small"><span class="chip">${sd.align}</span> Signature art: ${zh(D.SECT_SKILLS[s.id].zh)} ${D.SECT_SKILLS[s.id].name}. <span class="dim">${D.SECT_SKILLS[s.id].desc}</span></div></div>
         <div class="section"><div class="kv"><h2>Mission Hall</h2><span class="dim small">${s.active.length} of ${G.missionSlots()} slots · new board in ${Math.ceil(Math.max(0, s.boardIn))}s</span></div>
           ${S.dao.autoHunt ? `<div class="small">${toggle('autoMission', 'Auto-accept missions')}</div>` : ''}${active}${board}</div>
         <div class="section"><h2>Treasury</h2>${shop}</div>
@@ -246,7 +415,7 @@
         const have = S.pills[p.id] || 0;
         const left = `<div class="title">${zh(p.zh)} ${p.name} <span class="dim small">× ${have}</span></div><div class="dim small">${p.desc}</div>`
           + (locked ? `<div class="small dim">Opens at ${D.REALMS[G.realmOf(p.stage)].name} stage ${G.stageInRealm(p.stage) + 1}.</div>` : `<div class="small">${costText(c)} · ${pct(G.pillChance(p))} success</div>`);
-        return row(left, btn('Refine', `refine:${p.id}`, !locked && G.canAfford(c)) + btn('Consume', `use:${p.id}`, have > 0), locked ? 'locked' : '');
+        return row(left, btn('Refine', `refine:${p.id}`, !locked && G.canAfford(c)) + btn('Consume', `use:${p.id}`, have > 0), locked ? 'locked' : '', tip(`${p.zh} ${p.name}`, [`Base success ${pct(p.chance)}. Alchemy level adds 1% per level:`, ...sourceLines('alch'), 'Luck raises the chance of a perfect double pill.'], WD.LORE.pills[p.id]));
       }).join('');
       return `<div class="section"><div class="kv"><h2>Pill Furnace</h2><span class="dim small">Alchemy level ${G.alchLevel()}</span></div>
         <div class="dim small">Every attempt trains your hand. Fortune sometimes yields two perfect pills.</div>${rows}</div>`;
@@ -255,13 +424,13 @@
     fate() {
       const S = G.S;
       const f = S.lastFortune === null ? null : D.FORTUNES[S.lastFortune];
-      const odds = D.FORTUNES.map((x) => `<span class="chip" title="${esc(fxText(x.fx))}">${zh(x.zh)} ${x.name}</span>`).join('');
-      return `<div class="section"><h2>Temple of the Bamboo Sticks</h2>
+      const odds = D.FORTUNES.map((x) => `<span class="chip"${tip(`${x.zh} ${x.name}`, [`${fxText(x.fx)} for ${x.secs}s.`, `${x.weight}% of draws at no luck.`], x.text)}>${zh(x.zh)} ${x.name}</span>`).join('');
+      return `<div class="section"><h2${tip('Temple of the Bamboo Sticks', 'Each stick is numbered. The priest reads your fortune from the first to fall.', WD.LORE.fortunes)}>Temple of the Bamboo Sticks</h2>
           <div class="dim small">Shake the cylinder and let one stick fall. Its fortune lasts a few minutes and replaces the last. Luck tilts the draw, but calamity is always possible.</div>
           <div class="toolbar">${btn(`Draw a stick · ${fmt(G.divineCost())} stones`, 'divine', S.stones >= G.divineCost(), 'primary')}</div>
           ${f ? `<div class="row"><div><div class="fortune ${S.lastFortune <= 1 ? 'ill' : ''}">${f.zh}</div><div class="title">${f.name}</div><div class="small">${f.text}</div><div class="small dim">${fxText(f.fx)} for ${f.secs}s</div></div><div></div></div>` : ''}
           <div class="chips">${odds}</div></div>
-        <div class="section"><h2>Your Luck</h2><div class="kv"><span>Current luck</span><b>${fmt(G.mods().luck)}</b></div>
+        <div class="section"><h2>Your Luck</h2><div class="kv"${tip('Luck', ['Where your luck comes from:', ...sourceLines('luck')])}><span>Current luck</span><b>${fmt(G.mods().luck)}</b></div>
           <div class="dim small">Luck improves artifact grades, root rolls, mission and encounter odds, and the sticks.</div>
           <h2>Chance Encounters</h2><div class="dim small">${S.encounter ? 'Fate has found you. See the scroll under your dantian.' : `Resolved in all your lives: ${S.stats.encounters}.`}</div></div>`;
     },
@@ -272,20 +441,20 @@
         const l = S.karmaUps[u.id] || 0;
         const maxed = l >= u.max;
         return row(`<div class="title">${zh(u.zh)} ${u.name} <span class="dim small">${l} of ${u.max}</span></div><div class="dim small">${u.desc}</div>`,
-          btn(maxed ? 'Complete' : `${fmt(G.karmaCost(u))} karma`, `karma:${u.id}`, !maxed && S.karma >= G.karmaCost(u)), maxed ? 'done' : '');
+          btn(maxed ? 'Complete' : `${fmt(G.karmaCost(u))} karma`, `karma:${u.id}`, !maxed && S.karma >= G.karmaCost(u)), maxed ? 'done' : '', tip(`${u.zh} ${u.name}`, [u.desc, `Level ${l} of ${u.max}. Each level costs ×${u.growth} more.`, 'Kept through rebirth, reset by ascension.']));
       }).join('');
       const daoRows = D.DAO_UPS.map((u) => {
         const l = S.dao[u.id] || 0;
         const maxed = l >= u.max;
         return row(`<div class="title">${zh(u.zh)} ${u.name} <span class="dim small">${l} of ${u.max}</span></div><div class="dim small">${u.desc}</div>`,
-          btn(maxed ? 'Complete' : `${fmt(G.daoCost(u))} marks`, `dao:${u.id}`, !maxed && S.daoMarks >= G.daoCost(u)), maxed ? 'done' : '');
+          btn(maxed ? 'Complete' : `${fmt(G.daoCost(u))} marks`, `dao:${u.id}`, !maxed && S.daoMarks >= G.daoCost(u)), maxed ? 'done' : '', tip(`${u.zh} ${u.name}`, [u.desc, `Level ${l} of ${u.max}. Each level costs ×${u.growth} more.`, 'Permanent. Nothing removes it.']));
       }).join('');
       return `<div class="section"><h2>The Wheel of Rebirth</h2>
           <div class="small">Dying, or choosing to end this life now, earns <b>${fmt(G.karmaOnDeath())} karma</b>. The higher you climbed, the more you keep. You lose stones, techniques, sect and artifacts, and a new spirit root is rolled.</div>
           <div class="toolbar">${confirmRebirth ? btn('Yes, end this life', 'rebirthYes', true, 'primary') + btn('Keep living', 'rebirthNo') : btn('End this life', 'rebirthAsk', true, 'ghost')}</div>
           ${karmaRows}</div>
         <div class="section"><h2>Tree of the Dao</h2>
-          <div class="small dim">Survive the final tribulation at Half-Step Immortal stage 9 to ascend. Ascension earns Dao Marks that are never lost, multiplies your Qi, and resets karma upgrades. Each heaven's cultivation costs far more.</div>
+          <div class="small dim">Survive the tribulation at ${D.REALMS[G.realmOf(G.maxStage())].name} stage 9 to ascend. Ascension earns Dao Marks that are never lost, multiplies your Qi, resets karma upgrades, and opens one more realm above. Each heaven's cultivation costs far more.</div>
           ${S.ascensions || S.daoMarks ? daoRows : `<div class="dim small">Sealed until your first ascension. You have reached ${D.REALMS[G.realmOf(S.best)].name}.</div>`}</div>`;
     },
 
@@ -294,13 +463,19 @@
       const st = S.stats;
       const m = G.mods();
       const root = D.ROOT_TIERS[S.root.tier];
-      const elems = S.root.elements.map((e) => { const i = G.elementInfo(e); return `<span class="chip">${zh(i.zh)} ${i.name}: ${i.desc}</span>`; }).join('');
+      const elems = S.root.elements.map(elementChip).join('');
       const feats = D.FEATS.map((f) => row(`<div class="title ${S.feats[f.id] ? '' : 'dim'}">${f.name}</div><div class="dim small">${f.desc}</div>`, S.feats[f.id] ? '<span class="good small">Recorded</span>' : '', S.feats[f.id] ? 'done' : 'locked')).join('');
-      const list = [['Lives lived', st.lives], ['Breakthroughs', st.breakthroughs], ['Qi deviations', st.deviations], ['Tribulations survived', st.tribs], ['Foes defeated', st.kills], ['Pills refined', st.pills], ['Artifacts found', st.items], ['Sticks drawn', st.draws], ['Time cultivating', `${Math.floor(st.playSeconds / 60)} min`], ['Luck', fmt(m.luck)], ['Breakthrough bonus', pct(m.bt)]]
+      const list = [['Lives lived', st.lives], ['Breakthroughs', st.breakthroughs], ['Qi deviations', st.deviations], ['Tribulations survived', st.tribs], ['Foes defeated', st.kills], ['Pills refined', st.pills], ['Artifacts found', st.items], ['Sticks drawn', st.draws], ['Parries', st.parries], ['Best kill streak', st.bestStreak], ['Boss trophies', Object.keys(S.trophies).length], ['Tower best', S.towerBest], ['Fame', S.fame], ['Times defeated', st.defeats], ['Time cultivating', `${Math.floor(st.playSeconds / 60)} min`], ['Luck', fmt(m.luck)], ['Breakthrough bonus', pct(m.bt)]]
         .map(([k, v]) => `<div class="kv small"><span class="dim">${k}</span><span>${typeof v === 'number' ? fmt(v) : v}</span></div>`).join('');
       return `<div class="section"><h2>Spirit Root</h2><div>${zh(root.zh)} ${esc(G.rootName(S.root))} · Qi ×${root.mult}</div><div class="chips">${elems}</div></div>
         <div class="section"><h2>Annals</h2><div class="res">${list}</div></div>
         <div class="section"><div class="kv"><h2>Feats</h2><span class="dim small">${Object.keys(S.feats).length} of ${D.FEATS.length} · each gives +3% Qi</span></div>${feats}</div>
+        <div class="section"><div class="kv"><h2>Codex</h2><span class="dim small">${Object.keys(S.lore).length} entries read by hovering</span></div>
+          <div class="dim small">Nearly everything in the game has a note if you hover over it. Tap on a touch screen.</div>
+          ${WD.LORE.terms.map(([t, d]) => `<div class="small"><b>${t}</b> <span class="dim">${d}</span></div>`).join('')}
+          <h2>Hints from the Elders</h2>
+          ${WD.LORE.hints.slice(0, Math.min(WD.LORE.hints.length, 1 + Math.floor(Object.keys(S.lore).length / 5))).map((h) => `<div class="small">${h}</div>`).join('')}
+          <div class="dim small">Read more entries to hear more hints.</div></div>
         <div class="section"><h2>Save</h2><div class="dim small">Saved in this browser every 15 seconds. Copy your save string to move it to another device.</div>
           <div class="toolbar">${btn('Save now', 'save')}${btn('Copy save string', 'export')}${btn('Load from box', 'import')}${confirmWipe ? btn('Yes, erase everything', 'wipeYes', true, 'primary') + btn('Cancel', 'wipeNo') : btn('Erase save', 'wipeAsk', true, 'ghost')}</div>
           <div class="small good">${esc(saveMsg)}</div>
@@ -311,14 +486,30 @@
   function itemText(it) {
     const r = D.RARITIES[it.rarity];
     const slot = D.GEAR_SLOTS[it.slot];
-    const main = it.slot === 'weapon' || it.slot === 'robe' ? `+${fmt(it.power)} ${slot.stat.toLowerCase()}` : `+${pct(it.power)} ${slot.stat.toLowerCase()}`;
+    const power = G.itemPower(it);
+    const main = it.slot === 'weapon' || it.slot === 'robe' ? `+${fmt(power)} ${slot.stat.toLowerCase()}` : `+${fmt(power * 100)}% ${slot.stat.toLowerCase()}`;
     const extra = it.slot === 'talisman' && it.rarity ? `, +${it.rarity} luck` : '';
-    let affix = '';
-    if (it.affix) {
-      const v = it.affix.flat && !it.affix.pct ? `+${it.affix.v}` : `+${(it.affix.v * 100).toFixed(it.affix.pct ? 1 : 0)}%`;
-      affix = `, ${v} ${esc(it.affix.label)}`;
+    const affix = it.affixes.map((a) => {
+      const v = a.flat && !a.pct ? `+${a.v}` : `+${a.pct ? (a.v * 100).toFixed(1) : fmt(a.v * 100)}%`;
+      return `, ${v} ${esc(a.label)}`;
+    }).join('');
+    return `<div class="title ${r.shimmer ? 'shimmer' : ''}" style="color:${r.color}">${r.zh} · ${r.name} ${esc(it.name)}${it.plus ? ` +${it.plus}` : ''}</div><div class="dim small">${main}${extra}${affix}</div>`;
+  }
+
+  function meridianView() {
+    const S = G.S;
+    const i = S.meridians;
+    const list = D.MERIDIANS.map((x, n) => `<span class="grade" style="color:${n < i ? 'var(--realm)' : 'var(--line)'}" ${tip(`${x.zh} ${x.name}`, [fxText(x.fx), n < i ? '<span class="good">Open.</span>' : `Needs stage ${n * 4 + 1}.`], n < 12 ? WD.LORE.meridianNote : WD.LORE.vesselNote)}>${n < i ? '脉' : '·'}</span>`).join('');
+    const next = D.MERIDIANS[i];
+    let action = '<div class="good small">All meridians are open.</div>';
+    if (next) {
+      const open = S.stage >= i * 4;
+      action = row(`<div class="title">${zh(next.zh)} ${next.name}</div><div class="small good">${fxText(next.fx)}</div>${open ? '' : `<div class="dim small">Needs ${D.REALMS[G.realmOf(i * 4)].name} stage ${G.stageInRealm(i * 4) + 1}.</div>`}`,
+        btn(`${fmt(G.meridianCost(i))} Qi`, 'meridian', open && S.qi >= G.meridianCost(i)), open ? '' : 'locked');
     }
-    return `<div class="title" style="color:${r.color}">${r.zh} · ${esc(it.name)}</div><div class="dim small">${main}${extra}${affix}</div>`;
+    return `<div class="section"><div class="kv"><h2>Meridians ${zh('经脉')}</h2><span class="dim small">${i} of ${D.MERIDIANS.length} open</span></div>
+      <div class="dim small">Twelve regular channels, then the eight extraordinary vessels. Each opens for this life.</div>
+      <div class="ladder">${list}</div>${action}</div>`;
   }
 
   // ---------- overlays ----------
@@ -334,7 +525,7 @@
   function rootView() {
     const S = G.S;
     const t = D.ROOT_TIERS[S.root.tier];
-    const elems = S.root.elements.map((e) => { const i = G.elementInfo(e); return `<span class="chip">${zh(i.zh)} ${i.name}: ${i.desc}</span>`; }).join('');
+    const elems = S.root.elements.map(elementChip).join('');
     const cost = G.rerollCost();
     return `<div class="veil"><div class="rite">
       <div class="dim">${S.stats.lives === 1 ? 'A travelling elder presses your palm to the Root-Testing Stone.' : 'You open new eyes in a new body. The stone glows beneath your palm.'}</div>
@@ -406,10 +597,25 @@
     setTimeout(() => { sky.remove(); flash.remove(); }, 350);
   }
 
-  function toast(msg) {
+  function floatHit(text, cls) {
+    const card = $('foe-card');
+    if (!card || reduced || document.querySelectorAll('.float').length > 12) return;
+    const box = card.getBoundingClientRect();
+    if (box.height === 0) return;
+    const el = document.createElement('div');
+    el.className = `float ${cls}`;
+    el.textContent = text;
+    el.style.left = `${box.left + box.width * (0.25 + Math.random() * 0.5)}px`;
+    el.style.top = `${box.top + 4}px`;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 800);
+  }
+
+  function toast(msg, color) {
     const t = document.createElement('div');
     t.className = 'toast';
     t.textContent = msg;
+    if (color) { t.style.color = color; t.style.borderColor = color; }
     $('toasts').appendChild(t);
     setTimeout(() => t.remove(), 4000);
   }
@@ -422,6 +628,12 @@
       if (ev.kind === 'feat') toast(`Feat: ${ev.name}`);
       if (ev.kind === 'realm') burst(120);
       if (ev.kind === 'deviation') toast('Qi deviation! Injured.');
+      if (ev.kind === 'hit') floatHit(ev.crit ? `${fmt(ev.dmg)}!` : fmt(ev.dmg), ev.crit ? 'crit' : '');
+      if (ev.kind === 'parry') floatHit('PARRY', 'parry');
+      if (ev.kind === 'smash') floatHit('SMASHED', 'smash');
+      if (ev.kind === 'trophy') toast(`Trophy: ${ev.name}`);
+      if (ev.kind === 'title') toast(`Title: ${ev.name}`);
+      if (ev.kind === 'loot' && ev.it.rarity >= 4) toast(`${D.RARITIES[ev.it.rarity].name} grade: ${ev.it.name}`, D.RARITIES[ev.it.rarity].color);
     }
   }
 
@@ -434,6 +646,7 @@
     morph($('panel'), VIEWS[tab]());
     renderLog();
     renderOverlay();
+    refreshTip();
   }
 
   // ---------- actions ----------
@@ -447,6 +660,18 @@
     enc: (v) => { const r = G.chooseEncounter(+v); if (r) lastEncounterText = r.text; },
     tech: (v) => G.buyTech(v),
     region: (v) => G.setRegion(+v),
+    depth: (v) => G.setDepth(+v),
+    skill: (v) => G.useSkill(v),
+    strike: () => G.strike(),
+    boss: () => G.summonBoss(),
+    tower: () => G.enterTower(),
+    rival: (v) => G.challengeRival(+v),
+    flee: () => { G.S.fight = null; G.S.foe = null; },
+    forge: (v) => G.forge(v),
+    meridian: () => G.openMeridian(),
+    build: (v) => G.buildAbode(v),
+    hatch: () => G.hatchEgg(),
+    feed: () => G.feedBeast(),
     hunt: () => G.setHunting(!G.S.hunting),
     equip: (v) => G.equip(+v),
     sell: (v) => G.sell(+v),
@@ -495,11 +720,65 @@
     if (k) G.S.settings[k] = e.target.checked;
   });
   document.addEventListener('keydown', (e) => {
-    if (e.code !== 'Space' || e.repeat) return;
     const tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'button' || tag === 'textarea' || tag === 'input') return;
+    if (tag === 'textarea' || tag === 'input') return;
+    if (tab === 'combat' && /^[1-9]$/.test(e.key)) {
+      const id = G.skillList()[+e.key - 1];
+      if (id) { G.useSkill(id); render(); }
+      return;
+    }
+    if (e.code !== 'Space' || e.repeat || tag === 'button') return;
     e.preventDefault();
+    if (tab === 'combat' && G.S.hunting && G.S.foe) { G.strike(); return; }
     circulateFx();
+  });
+
+  // ---------- tooltip behaviour ----------
+  const tipEl = $('tip');
+  let tipFor = null;
+  let tipTimer = null;
+  function placeTip(target) {
+    const box = target.getBoundingClientRect();
+    const w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+    const left = Math.max(8, Math.min(innerWidth - w - 8, box.left + box.width / 2 - w / 2));
+    const top = box.top - h - 8 >= 0 ? box.top - h - 8 : Math.min(innerHeight - h - 8, box.bottom + 8);
+    tipEl.style.left = `${left}px`;
+    tipEl.style.top = `${Math.max(8, top)}px`;
+  }
+  function showTip(target) {
+    tipFor = target;
+    const html = target.getAttribute('data-tip');
+    tipEl.innerHTML = html;
+    tipEl.hidden = false;
+    placeTip(target);
+    // The title identifies an entry, so live numbers do not count as new reading.
+    const key = (tipEl.querySelector('b') || tipEl).textContent.slice(0, 60);
+    if (G.S && !G.S.lore[key]) G.S.lore[key] = 1;
+  }
+  function hideTip() { tipFor = null; tipEl.hidden = true; }
+  function refreshTip() {
+    if (!tipFor) return;
+    if (!document.contains(tipFor) || !tipFor.getAttribute('data-tip')) { hideTip(); return; }
+    const html = tipFor.getAttribute('data-tip');
+    if (tipEl.innerHTML !== html) { tipEl.innerHTML = html; placeTip(tipFor); }
+  }
+  document.addEventListener('mouseover', (e) => {
+    const t = e.target.closest('[data-tip]');
+    if (t && t !== tipFor) showTip(t);
+    else if (!t && tipFor) hideTip();
+  });
+  document.addEventListener('focusin', (e) => {
+    const t = e.target.closest && e.target.closest('[data-tip]');
+    if (t && e.target.matches(':focus-visible')) showTip(t);
+  });
+  document.addEventListener('focusout', () => { if (tipFor && !tipFor.matches(':hover')) hideTip(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideTip(); });
+  // Touch screens have no hover: a tap shows the note for a few seconds.
+  document.addEventListener('pointerup', (e) => {
+    if (e.pointerType !== 'touch') return;
+    const t = e.target.closest('[data-tip]');
+    clearTimeout(tipTimer);
+    if (t) { showTip(t); tipTimer = setTimeout(hideTip, 3500); } else hideTip();
   });
 
   // ---------- saves ----------
@@ -521,7 +800,7 @@
     const box = $('savebox');
     try {
       const data = JSON.parse(decodeURIComponent(escape(atob(box.value.trim()))));
-      if (!data || data.v !== 1 || !data.root) throw new Error('bad');
+      if (!data || !data.root || data.v > 2) throw new Error('bad');
       G.load(data);
       save();
       box.value = '';
@@ -533,7 +812,7 @@
   function boot() {
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { saved = null; }
-    if (saved && saved.v === 1 && saved.root) {
+    if (saved && saved.root) {
       G.load(saved);
       const r = G.applyOffline((Date.now() - (saved.lastSeen || Date.now())) / 1000);
       if (r) toast(`Seclusion: +${fmt(r.qi)} Qi, +${fmt(r.stones)} stones`);
