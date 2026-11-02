@@ -19,10 +19,24 @@
       }
     };
 
+    // Optional daily schedule: play for `on` seconds, then stay away for `off` seconds.
+    const session = opts.session;
+    let sinceBreak = 0, awaySeconds = 0;
+    out.offlineQiShare = 0;
+
     while (t < maxSeconds && out.errors.length < 5) {
       let S = G.S;
+      if (session && sinceBreak >= session.on && !S.dead && !S.choosingRoot && !S.ascendReady) {
+        const qiBefore = S.qi;
+        const r = G.applyOffline(session.off);
+        sinceBreak = 0;
+        awaySeconds += session.off;
+        if (r) out.offlineQiShare = Math.max(out.offlineQiShare, r.qi / Math.max(1, G.stageCost(S.stage)));
+        if (!Number.isFinite(S.qi) || S.qi < qiBefore) out.errors.push(`offline qi ${S.qi} at ${t}s`);
+        S.fx.length = 0;
+      }
       if (S.choosingRoot) {
-        while (S.root.tier < 2 && G.rerollRoot()) { /* spend spare karma on a decent root */ }
+        while (S.root.tier < Math.round(G.ladderCurve('root').centre) && G.rerollRoot()) { /* spend spare karma on a decent root */ }
         G.confirmRoot();
       }
       if (S.dead) {
@@ -32,7 +46,7 @@
         continue;
       }
       if (S.ascendReady) {
-        out.ascensions.push({ t, lives: S.stats.lives });
+        out.ascensions.push({ t, away: awaySeconds, lives: S.stats.lives });
         G.ascend();
         for (let bought = true; bought;) bought = D.DAO_UPS.some((u) => G.buyDao(u.id));
         if (opts.stopAfterAscensions && out.ascensions.length >= opts.stopAfterAscensions) break;
@@ -45,6 +59,7 @@
       const open = G.TECHS.filter((x) => S.stage >= x.unlock);
       for (let n = 0; n < 40; n++) {
         const next = open.filter((x) => {
+          if (G.techMaxed(x.id)) return false;
           const c = G.techCost(x);
           // Leave Qi for the next stage: only spend it when it is small next to the stage cost.
           return G.canAfford(c) && (!c.qi || c.qi < G.stageCost(S.stage) * 0.4);
@@ -59,6 +74,9 @@
       for (let i = 0; i <= G.bestRegion(); i++) {
         for (let d = 0; d <= (S.maxDepth[i] || 0); d++) if (safe(G.foeStats(i, d))) { target = i; depth = d; }
       }
+      // A realm gate may ask for a specific boss.
+      const wantBoss = G.realmGates().find((g) => g.region !== undefined && !g.met);
+      if (wantBoss) { target = wantBoss.region; depth = 0; }
       if (!S.fight) {
         if (S.region !== target) G.setRegion(target);
         if (S.depth !== depth) G.setDepth(depth);
@@ -80,11 +98,21 @@
       }
 
       // Meridians, abode and beast.
-      if (S.meridians < D.MERIDIANS.length && S.stage >= S.meridians * 4 && S.qi > G.meridianCost(S.meridians) * 3) G.openMeridian();
+      const gateWantsMeridian = G.realmGates().some((g) => g.tab === 'cultivate' && !g.met);
+      if (S.meridians < D.MERIDIANS.length && S.stage >= S.meridians * 4 && S.qi > G.meridianCost(S.meridians) * (gateWantsMeridian ? 1 : 3)) G.openMeridian();
+      if (G.realmGates().some((g) => g.tab === 'sect' && !g.met) && S.sect) while (G.donateCores()) { /* buy rank with spare cores */ }
+      if (S.cores > 100) {
+        const fair = (key, bonus) => Math.round(G.ladderCurve(key, bonus).centre);
+        S.meridianQ.some((q, n) => q < fair('purity') && G.temperMeridian(n));
+        const t0 = G.TECHS.find((x) => G.techLevel(x.id) && S.techQ[x.id] < fair('comprehension'));
+        if (t0) G.contemplate(t0.id);
+        for (const slot in S.gear) if (S.gear[slot] && (S.gear[slot].cond || 3) < fair('condition', S.gear[slot].rarity * 0.1)) G.reforge(slot);
+      }
+      if (S.stones > G.surveyCost() * 5 && S.abodeSite < Math.round(G.ladderCurve('sites').centre)) G.surveySite();
       for (const a of D.ABODE) if (S.stones > G.abodeCost(a) * 3) G.buildAbode(a.id);
       if (S.eggs > 0) G.hatchEgg();
       if (S.beast && S.herbs > G.beastFeedCost() * 4) G.feedBeast();
-      for (const slot in S.gear) if (S.gear[slot] && S.stones > G.forgeCost(S.gear[slot]) * 6 && (S.gear[slot].plus || 0) < 10) G.forge(slot);
+      for (const slot in S.gear) if (S.gear[slot] && S.stones > G.forgeCost(S.gear[slot]) * 6 && S.cores > G.forgeCores(S.gear[slot]) * 3) G.forge(slot);
 
       if (!S.sect && S.stage >= G.sectJoinStage) G.joinSect(sectId);
       if (S.sect) {
@@ -116,10 +144,14 @@
       }
       G.tick(1);
       t += 1;
+      sinceBreak += 1;
+      if (opts.progress && t % 3600 === 0) opts.progress({ hour: t / 3600, stage: G.S.stage, asc: G.S.ascensions });
       S.fx.length = 0;
       check('tick');
     }
     const S = G.S;
+    out.awaySeconds = awaySeconds;
+    out.ascensionAway = out.ascensions.length;
     out.end = { t, stage: S.stage, best: S.best, lives: S.stats.lives, karma: S.karma, dao: S.daoMarks, asc: S.ascensions, feats: Object.keys(S.feats).length, deviations: S.stats.deviations, tribs: S.stats.tribs, trophies: Object.keys(S.trophies).length, tower: S.towerBest, duels: S.duelsWon, bestRarity: S.stats.bestRarity, fame: S.fame, S0ok: !!S0 };
     return out;
   }

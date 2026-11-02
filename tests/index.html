@@ -9,6 +9,21 @@
   <script src="../js/core.js"></script>
   <script src="bot.js"></script>
   <script>
+    // The offline clock rules: a device set forward must not earn time.
+    (function () {
+      const G = WD.Game;
+      G.newGame();
+      const hour = 3600000, base = 1e12;
+      const check = (name, ok) => { if (!ok) throw new Error('Clock test failed: ' + name); };
+      const a = G.resolveAway({ lastSeen: base, trustedNow: base + hour, deviceNow: base + 100 * hour, pool: 3600 });
+      check('server time wins over a forward clock', a.verified && a.seconds === 3600);
+      const b = G.resolveAway({ lastSeen: base, trustedNow: null, deviceNow: base + 100 * hour, pool: 3600 });
+      check('unconfirmed time is limited to the pool', !b.verified && b.seconds === 3600 && b.pool === 0);
+      const c = G.resolveAway({ lastSeen: base + hour, trustedNow: null, deviceNow: base + 200 * hour, pool: b.pool });
+      check('an empty pool earns nothing', c.seconds === 0);
+      const e = G.resolveAway({ lastSeen: base + 500 * hour, trustedNow: base, deviceNow: base, pool: 0 });
+      check('a future save time earns nothing and refills the pool', e.seconds === 0 && e.pool === 3600);
+    })();
     setTimeout(function () {
       const results = [1, 2, 3].map((seed) => WD.runBot({ seed, maxSeconds: 24 * 3600, stopAfterAscensions: 1 }));
       window.results = results;

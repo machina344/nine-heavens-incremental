@@ -38,7 +38,12 @@ Then visit http://localhost:8123.
 - **Hover notes and Codex:** hover over almost anything for its exact stat sources, odds and lore drawn from Chinese myth, medicine and wuxia fiction. Reading widely unlocks elder hints and a feat.
 - **Rebirth:** karma buys upgrades that carry between lives.
 - **Ascension:** Dao Marks buy permanent upgrades. Each heaven costs far more to climb.
-- **Saves:** automatic saves in the browser, up to 8 hours of offline progress at half rate, and a copyable save string.
+- **Seclusion:** time away pays 30–60% of your usual income for 8–24 hours without aging you. Your hunt, abode, sect stipend and active missions keep paying, long absences can turn up artifacts and eggs, and you return to a report and a temporary Qi bonus. The Closed-Door Chamber and Dao of Stillness raise both limits.
+- **Trusted time:** time away is measured with the web server's clock, not the device's, so moving the clock forward earns nothing. Without a connection, at most 1 hour of unconfirmed time counts until the server is reached again.
+- **Caps and Perfection:** techniques, abode buildings, forging, beasts, the sect manual and meridians have level caps. Reaching one pays its own reward plus +1% to everything.
+- **Interconnected systems:** Beast Cores from combat feed pills, forging, deep meridians, the abode, beasts and sect donations. Each new realm asks for meridians, a region boss and a sect rank, and "The Path Ahead" links to the tab you need next.
+- **Rolled qualities:** spirit roots (12 grades), technique comprehension (12), pill grades (10), mission ranks (14), meridian purity (10), cave sites (12) and artifact condition (10) all roll on bell curves that rise with your realm and heavens, so rerolling stays worthwhile.
+- **Saves:** automatic saves in the browser and a copyable save string.
 
 ## Project layout
 
@@ -53,4 +58,4 @@ Then visit http://localhost:8123.
 
 ## Check the pacing
 
-Serve the folder and open `/tests/index.html`. A bot plays three seeded runs through the real rules with no saves touched, then prints when it reached each realm and ascended. It also reports any invalid numbers. In the last full runs across two seeds, it reached its first ascension in about 6 to 9 simulated hours and its ninth in about 88 to 149. The bot plays nonstop and uses every skill on cooldown, so real players will take longer. `tests/worker.js` runs longer simulations off the main thread.
+Serve the folder and open `/tests/index.html`. A bot plays three seeded runs through the real rules with no saves touched, then prints when it reached each realm and ascended. It also reports any invalid numbers. In the latest run (one seed, playing nonstop), it reached its ninth ascension in about 125 hours. The bot uses every skill on cooldown, so real players will take longer. `tests/worker.js` runs longer simulations off the main thread.

@@ -22,13 +22,21 @@ window.WD = window.WD || {};
   const HEAVEN_ZH = ['凡间', '一重天', '二重天', '三重天', '四重天', '五重天', '六重天', '七重天', '八重天', '九重天'];
 
   // Spirit roots. `weight` is the roll chance, `mult` multiplies Qi, `count` is how many elements the root splits across.
+  // Spirit roots. `mult` multiplies Qi, `count` is how many elements the root splits across.
+  // Rolls follow the sliding bell curve in core.js (LADDER_CURVES.root).
   const ROOT_TIERS = [
-    { id: 'five', name: 'Five-Spirit Root', zh: '五灵根', weight: 44, mult: 1, count: 5, power: 0.1 },
-    { id: 'four', name: 'Four-Spirit Root', zh: '四灵根', weight: 28, mult: 1.35, count: 4, power: 0.2 },
-    { id: 'three', name: 'Three-Spirit Root', zh: '三灵根', weight: 16, mult: 1.9, count: 3, power: 0.35 },
-    { id: 'dual', name: 'Dual-Spirit Root', zh: '双灵根', weight: 8.5, mult: 2.8, count: 2, power: 0.55 },
-    { id: 'heavenly', name: 'Heavenly Root', zh: '天灵根', weight: 3, mult: 4.5, count: 1, power: 0.9 },
-    { id: 'variant', name: 'Variant Root', zh: '异灵根', weight: 0.5, mult: 7.5, count: 1, power: 1.4, variant: true },
+    { id: 'crippled', name: 'Crippled Root', zh: '残缺灵根', mult: 0.7, count: 5, power: 0.05 },
+    { id: 'five', name: 'Five-Spirit Root', zh: '五灵根', mult: 1, count: 5, power: 0.1 },
+    { id: 'four', name: 'Four-Spirit Root', zh: '四灵根', mult: 1.35, count: 4, power: 0.2 },
+    { id: 'three', name: 'Three-Spirit Root', zh: '三灵根', mult: 1.9, count: 3, power: 0.35 },
+    { id: 'dual', name: 'Dual-Spirit Root', zh: '双灵根', mult: 2.8, count: 2, power: 0.55 },
+    { id: 'pureDual', name: 'Pure Dual Root', zh: '纯双灵根', mult: 3.6, count: 2, power: 0.7 },
+    { id: 'heavenly', name: 'Heavenly Root', zh: '天灵根', mult: 4.5, count: 1, power: 0.9 },
+    { id: 'trueHeavenly', name: 'True Heavenly Root', zh: '真天灵根', mult: 6, count: 1, power: 1.1 },
+    { id: 'variant', name: 'Variant Root', zh: '异灵根', mult: 7.5, count: 1, power: 1.4, variant: true },
+    { id: 'saint', name: 'Saint Root', zh: '圣灵根', mult: 10, count: 1, power: 1.8, variant: true },
+    { id: 'immortalBone', name: 'Immortal Bone', zh: '仙骨', mult: 14, count: 1, power: 2.4, variant: true },
+    { id: 'chaos', name: 'Chaos Root', zh: '混沌灵根', mult: 20, count: 1, power: 3.2, variant: true },
   ];
 
   const ELEMENTS = {
@@ -247,6 +255,7 @@ window.WD = window.WD || {};
     { id: 'time', name: 'Dao of Time', zh: '光阴', base: 2, growth: 2, max: 10, fx: { life: 0.5 }, desc: '+50% lifespan per level.' },
     { id: 'fortune', name: 'Dao of Fortune', zh: '气运', base: 2, growth: 2, max: 10, fx: { luck: 10, bt: 0.02 }, desc: '+10 luck, +2% breakthrough per level.' },
     { id: 'thunder', name: 'Dao of Thunder', zh: '天雷', base: 2, growth: 2, max: 10, fx: { trib: 0.5 }, desc: '+50% tribulation resistance per level.' },
+    { id: 'stillness', name: 'Dao of Stillness', zh: '清静', base: 2, growth: 2, max: 6, fx: {}, desc: '+2% seclusion income and +1 hour of seclusion per level.' },
     { id: 'karmaKeep', name: 'Unbroken Wheel', zh: '轮回不灭', base: 3, growth: 2, max: 5, fx: {}, desc: 'Keep 20% of unspent and invested karma per level when ascending.' },
     { id: 'autoMajor', name: 'Heart Without Doubt', zh: '无疑', base: 4, growth: 1, max: 1, unlock: 'autoMajor', desc: 'Unlocks automatic major breakthroughs.' },
     { id: 'autoHunt', name: 'Sect Runs Itself', zh: '无为', base: 3, growth: 1, max: 1, unlock: 'autoMission', desc: 'Unlocks automatic sect missions.' },
@@ -265,7 +274,7 @@ window.WD = window.WD || {};
     { id: 'slayer', name: 'Scourge of Beasts', desc: 'Defeat 1,000 foes.', test: (S) => S.stats.kills >= 1000 },
     { id: 'alchemist', name: 'Furnace Never Cold', desc: 'Refine 100 pills.', test: (S) => S.stats.pills >= 100 },
     { id: 'reborn', name: 'Wheel of Rebirth', desc: 'Live five lives.', test: (S) => S.stats.lives >= 5 },
-    { id: 'heavenly', name: 'Chosen of Heaven', desc: 'Awaken a Heavenly or Variant Root.', test: (S) => S.stats.bestRoot >= 4 },
+    { id: 'heavenly', name: 'Chosen of Heaven', desc: 'Awaken a Heavenly Root or better.', test: (S) => S.stats.bestRoot >= 6 },
     { id: 'immortalItem', name: 'Treasure of the Immortals', desc: 'Find an Immortal-grade artifact.', test: (S) => S.stats.bestRarity >= 13 },
     { id: 'master', name: 'One Who Commands', desc: 'Become a Sect Master.', test: (S) => S.stats.bestRank >= 6 },
     { id: 'storm', name: 'Lightning Rod', desc: 'Survive 5 heavenly tribulations.', test: (S) => S.stats.tribs >= 5 },
@@ -387,6 +396,7 @@ window.WD = window.WD || {};
     { id: 'vein', name: 'Spirit Stone Vein', zh: '灵脉', cost: 10, stoneRate: 0.03, desc: 'Mines stones over time, rising with the regions you can reach.' },
     { id: 'furnace', name: 'Earth Fire Chamber', zh: '地火室', cost: 15, fx: { alch: 0.01 }, max: 25, desc: '+1% pill success per level.' },
     { id: 'hall', name: 'Sword-Testing Hall', zh: '试剑堂', cost: 14, fx: { atk: 0.1, hp: 0.1 }, desc: '+10% attack and vitality per level.' },
+    { id: 'chamber', name: 'Closed-Door Chamber', zh: '闭关室', cost: 20, max: 20, desc: '+1% seclusion income and +0.4 hours of seclusion per level.' },
     { id: 'jade', name: 'Longevity Jade Bed', zh: '寒玉床', cost: 30, fx: { life: 0.02 }, max: 25, desc: '+2% lifespan per level.' },
   ];
 
@@ -454,15 +464,78 @@ window.WD = window.WD || {};
     { id: 'forge', name: 'Master Smith', desc: 'Forge an artifact to +15.', test: (S) => S.stats.bestPlus >= 15 },
     { id: 'title', name: 'Leader of the Martial World', desc: 'Earn that title through fame.', test: (S) => S.fame >= 3e6 },
     { id: 'tier15', name: 'Gift of the Golden Immortals', desc: 'Find a Golden Immortal-grade artifact.', test: (S) => S.stats.bestRarity >= 15 },
+    { id: 'secluded', name: 'Ten Thousand Breaths', desc: 'Spend 100 hours in seclusion.', test: (S) => S.stats.secludedSeconds >= 360000 },
     { id: 'scholar', name: 'Scholar of the Dao', desc: 'Read 40 different entries by hovering over things.', test: (S) => Object.keys(S.lore || {}).length >= 40 },
     { id: 'tier23', name: 'Chaos Origin', desc: 'Find the highest grade of artifact.', test: (S) => S.stats.bestRarity >= 23 },
   );
 
   const MAX_DEPTH = 9;
 
+  // ---------- rolled qualities and earned ranks ----------
+  // Each rolled quality is a ladder. Rolls follow a bell curve whose centre slides up with your
+  // realm and heavens (see LADDER_CURVES in core.js), so yesterday's best roll becomes today's average.
+  const ladder = (rows, mult) => rows.map((r, i) => ({ name: r[0], zh: r[1], mult: +mult(i).toFixed(2) }));
+  const COMPREHENSION = ladder([
+    ['Muddled', '混沌'], ['Shallow', '浅悟'], ['Common', '平常'], ['Clear', '明晰'], ['Deep', '深悟'], ['Keen', '通透'],
+    ['Profound', '精深'], ['Insightful', '洞彻'], ['Enlightened', '顿悟'], ['Transcendent', '超凡'], ['Heaven-Touched', '天授'], ['One with the Dao', '合道'],
+  ], (i) => 0.8 * Math.pow(1.14, i));
+  const PILL_GRADES = ladder([
+    ['Crude', '劣品'], ['Low', '下品'], ['Middle', '中品'], ['High', '上品'], ['Superior', '极品'],
+    ['Refined', '精炼'], ['Spirit-Patterned', '灵纹'], ['Dao-Patterned', '道纹'], ['Immortal', '仙品'], ['Nine Revolutions', '九转'],
+  ], (i) => 0.8 * Math.pow(1.3, i));
+  const MISSION_RANKS = ['F', 'E', 'D', 'C', 'B', 'A', 'S', 'SS', 'SSS', 'Earth', 'Heaven', 'Saint', 'Immortal', 'Dao'].map((name, i) => ({
+    name, mult: +Math.pow(1.4, i).toFixed(2), chance: +(0.04 - 0.025 * i).toFixed(3), cores: i < 2 ? 0 : Math.round(Math.pow(1.6, i - 1)),
+  }));
+  const PURITY = ladder([
+    ['Blocked', '阻'], ['Clogged', '滞'], ['Murky', '浊'], ['Clear', '通'], ['Pure', '纯'],
+    ['Bright', '明'], ['Lustrous', '润'], ['Flawless', '无瑕'], ['Crystal', '晶'], ['Primordial', '先天'],
+  ], (i) => 0.85 * Math.pow(1.07, i));
+  const SITES = ladder([
+    ['Barren Hollow', '贫瘠之地'], ['Rocky Cave', '石窟'], ['Quiet Valley', '清幽山谷'], ['Bamboo Glade', '竹林幽境'], ['Spirit Spring', '灵泉'],
+    ['Spirit Vein Ridge', '灵脉山脊'], ['Misty Peak Grotto', '云峰洞府'], ['Blessed Land', '洞天福地'], ['Cave Heaven', '小洞天'],
+    ['Dragon\'s Lair Point', '龙穴'], ['Immortal Mountain', '仙山'], ['Navel of Heaven and Earth', '天地之脐'],
+  ], (i) => 0.7 * Math.pow(1.12, i));
+  const CONDITIONS = ladder([
+    ['Shattered', '残'], ['Cracked', '裂'], ['Worn', '旧'], ['Whole', '完'], ['Fine', '良'],
+    ['Pristine', '新'], ['Flawless', '无瑕'], ['Radiant', '辉'], ['Spirit-Woven', '灵织'], ['Heaven-Wrought', '天工'],
+  ], (i) => 0.85 * Math.pow(1.08, i));
+  const SKILL_RANKS = [
+    { name: 'Novice', use: 0 }, { name: 'Trained', use: 25 }, { name: 'Skilled', use: 100 }, { name: 'Expert', use: 300 }, { name: 'Master', use: 800 }, { name: 'Grandmaster', use: 2000 },
+  ];
+  const BEAST_STAGES = [
+    { name: 'Hatchling', zh: '幼体', level: 0 }, { name: 'Juvenile', zh: '少年', level: 10 }, { name: 'Adult', zh: '成年', level: 25 }, { name: 'Spirit', zh: '灵体', level: 45 }, { name: 'Divine', zh: '神兽', level: 70 },
+  ];
+  const FOE_AFFIXES = [
+    { name: 'Swift', hp: 1, dmg: 1.4, pay: 1.2 }, { name: 'Armoured', hp: 1.6, dmg: 1, pay: 1.3 }, { name: 'Gilded', hp: 1.2, dmg: 1, pay: 2.5 },
+    { name: 'Venomous', hp: 1, dmg: 1.7, pay: 1.4 }, { name: 'Ancient', hp: 1.8, dmg: 1.4, pay: 1.9 },
+  ];
+
+  // Abode level caps, and the reward for finishing each building.
+  const ABODE_CAPS = {
+    array: [30, { qi: 0.5 }, '+50% Qi'], garden: [30, { herbs: 0.5 }, '+50% herbs'], vein: [30, { stones: 0.5 }, '+50% stones'],
+    furnace: [25, { alch: 0.1 }, '+10% pill success'], hall: [30, { atk: 0.5, hp: 0.5 }, '+50% attack and vitality'],
+    chamber: [20, { bt: 0.05 }, '+5% breakthrough'], jade: [25, { life: 0.25 }, '+25% lifespan'],
+  };
+  ABODE.forEach((a) => { const c = ABODE_CAPS[a.id]; a.max = c[0]; a.maxFx = c[1]; a.maxText = c[2]; });
+  const PILL_CORES = { foundation: 2, insight: 3, longevity: 5, marrow: 12 };
+  PILLS.forEach((p) => { p.cores = PILL_CORES[p.id] || 0; });
+
+  FEATS.push(
+    { id: 'firstPerfect', name: 'One Thing Done Well', desc: 'Perfect anything.', test: (S) => Object.keys(S.perfectSeen || {}).length >= 1 },
+    { id: 'perfect25', name: 'Hall of Perfection', desc: 'Perfect 25 different things.', test: (S) => Object.keys(S.perfectSeen || {}).length >= 25 },
+    { id: 'enlightened', name: 'Sudden Awakening', desc: 'Roll Enlightened comprehension on a technique.', test: (S) => S.stats.bestComprehension >= 8 },
+    { id: 'supreme', name: 'Pill Clouds', desc: 'Refine an Immortal-grade pill.', test: (S) => S.stats.bestPillGrade >= 8 },
+    { id: 'dragonLair', name: 'Dragon\'s Lair', desc: 'Settle on a Dragon\'s Lair Point or better.', test: (S) => S.stats.bestSite >= 9 },
+    { id: 'chaosRoot', name: 'Born of Chaos', desc: 'Awaken a Chaos Root.', test: (S) => S.stats.bestRoot >= 11 },
+    { id: 'wrought', name: 'Heaven-Wrought', desc: 'Own an artifact in Heaven-Wrought condition.', test: (S) => S.stats.bestCondition >= 9 },
+    { id: 'grandmaster', name: 'Grandmaster', desc: 'Raise a skill to Grandmaster.', test: (S) => S.stats.bestSkillRank >= 5 },
+    { id: 'divine', name: 'Divine Companion', desc: 'Raise a spirit beast to Divine.', test: (S) => S.stats.bestBeastStage >= 4 },
+  );
+
+
   WD.DATA = {
     STAGES_PER_REALM, REALMS, HEAVENS, HEAVEN_ZH, ROOT_TIERS, ELEMENTS, VARIANTS, QI_TECHS, ATK_TECHS, HP_TECHS,
     SECTS, SECT_RANKS, MISSIONS, REGIONS, RARITIES, GEAR_SLOTS, GEAR_ADJ, AFFIXES, PILLS, FORTUNES, ENCOUNTERS,
-    ENCOUNTER_BUFFS, KARMA_UPS, DAO_UPS, FEATS, SKILLS, SECT_SKILLS, RIVALS, TITLES, MERIDIANS, MASTERY, ABODE, BEASTS, MAX_DEPTH,
+    ENCOUNTER_BUFFS, KARMA_UPS, DAO_UPS, FEATS, SKILLS, SECT_SKILLS, RIVALS, TITLES, MERIDIANS, MASTERY, ABODE, BEASTS, MAX_DEPTH, COMPREHENSION, PILL_GRADES, MISSION_RANKS, PURITY, SITES, SKILL_RANKS, BEAST_STAGES, FOE_AFFIXES, CONDITIONS,
   };
 })();

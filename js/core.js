@@ -10,13 +10,16 @@
 
   // ---------- tunable pacing ----------
   const P = {
-    stageBase: 25, stageGrowth: 1.9, stageGrowthLate: 1.62, stageTaperAt: 36, stageGrowthFinal: 1.4, stageFinalAt: 76, heavenCost: 10, heavenFoeHp: 100, heavenFoeDmg: 30, heavenFoeStones: 6, karmaScale: 1.3,
+    stageBase: 25, stageGrowth: 2, stageGrowthLate: 1.72, stageTaperAt: 36, stageGrowthFinal: 1.48, stageFinalAt: 76, heavenCost: 10, heavenSteepen: 0.01, heavenFoeHp: 100, heavenFoeDmg: 30, heavenFoeStones: 6, karmaScale: 1.3,
     stageQiBonus: 1.05, realmQiBonus: 1.4,
-    qiTechPower: 0.5, qiTechPowerStep: 7, qiTechStoneBase: 25, qiTechStoneStep: 16, techGrowth: 1.2,
+    qiTechPower: 0.5, qiTechPowerStep: 7, qiTechStoneBase: 25, qiTechStoneStep: 9, techGrowth: 1.2,
     fightTechPower: 2, fightTechStep: 14, fightTechCost: 15, fightTechCostStep: 60,
     enemyHp: 14, enemyHpStep: 9, enemyDmg: 1.5, enemyDmgStep: 7, enemyStones: 3, enemyStoneStep: 6,
     atkStage: 1.07, hpStage: 1.07,
-    offlineRate: 0.5, offlineCapHours: 8,
+    techMax: 100, manualMax: 25, unverifiedHours: 1,
+    offlineRate: 0.3, offlineCapHours: 8, offlineRateMax: 0.6, offlineCapMax: 24,
+    offlineRatePerChamber: 0.01, offlineCapPerChamber: 0.4, offlineRatePerDao: 0.02, offlineCapPerDao: 1,
+    offlineFindsMax: 6, offlineFindItem: 0.2, offlineFindEgg: 0.04, insightMinSecs: 1800, insightMaxSecs: 600, insightQi: 0.5,
     encounterMin: 75, encounterMax: 170,
     towerStep: 1.5, towerDmgStep: 1.38, masteryStep: 1.5, gearStep: 5,
     gradeBase: 0.4, gradeRegion: 0.6, gradeRealmFloor: 0.8, gradeShift: 0.15, gradeLuck: 0.25, gradeLuckCap: 5, gradeAscension: 0.5, gradeWidth: 1.5,
@@ -43,6 +46,44 @@
   const stageInRealm = (stage) => stage % SPR;
   const isMajor = (stage) => stage % SPR === SPR - 1;
 
+  // ---------- sliding quality ladders ----------
+  // Every rolled quality draws from a bell curve. Its centre climbs with realm and heavens
+  // (plus a ladder-specific bonus and some luck), and grades far below the centre stop appearing.
+  const LADDER_CURVES = {
+    root: { list: () => D.ROOT_TIERS, base: 1.3, perRealm: 0, perAscension: 0.8, width: 1.3 },
+    comprehension: { list: () => D.COMPREHENSION, base: 1.6, perRealm: 0.45, perAscension: 0.35, width: 1.3 },
+    pills: { list: () => D.PILL_GRADES, base: 1.2, perRealm: 0.3, perAscension: 0.3, width: 1.1 },
+    missions: { list: () => D.MISSION_RANKS, base: 1.2, perRealm: 0.4, perAscension: 0.4, width: 1.2 },
+    purity: { list: () => D.PURITY, base: 1.8, perRealm: 0.3, perAscension: 0.3, width: 1.1 },
+    sites: { list: () => D.SITES, base: 1.4, perRealm: 0.35, perAscension: 0.4, width: 1.3 },
+    condition: { list: () => D.CONDITIONS, base: 2.4, perRealm: 0.2, perAscension: 0.2, width: 1.2 },
+  };
+  function ladderCurve(key, bonus) {
+    const cv = LADDER_CURVES[key];
+    const last = cv.list().length - 1;
+    const fate = S ? fateLuck() : 0;
+    const luck = Math.min(1.5, Math.sign(fate) * Math.sqrt(Math.abs(fate)) * 0.1);
+    const realm = S ? realmOf(S.stage) : 0;
+    const asc = S ? S.ascensions : 0;
+    const centre = Math.max(0, Math.min(last, cv.base + cv.perRealm * realm + cv.perAscension * asc + luck + (bonus || 0)));
+    return {
+      centre,
+      low: Math.max(0, Math.min(last, Math.ceil(centre - 2 * cv.width))),
+      high: Math.min(last, Math.floor(centre + 2.5 * cv.width)),
+      width: cv.width,
+    };
+  }
+  function ladderOdds(key, bonus) {
+    const c = ladderCurve(key, bonus);
+    const w = LADDER_CURVES[key].list().map((x, i) => (i < c.low || i > c.high ? 0 : Math.exp(-Math.pow(i - c.centre, 2) / (2 * c.width * c.width))));
+    const total = w.reduce((a, b) => a + b, 0);
+    return w.map((x) => x / total);
+  }
+  function rollLadder(key, bonus) {
+    const odds = ladderOdds(key, bonus);
+    return weighted(odds, (p) => p);
+  }
+
   function log(msg, kind) {
     S.log.unshift({ m: msg, k: kind || '', a: Math.floor(S.age) });
     if (S.log.length > 80) S.log.length = 80;
@@ -52,10 +93,10 @@
   // ---------- state ----------
   function freshMeta() {
     return {
-      v: 2, lore: {}, trophies: {}, maxDepth: {}, towerBest: 0, duelsWon: 0, fame: 0, ascensions: 0, daoMarks: 0, dao: {}, karma: 0, karmaUps: {}, feats: {}, best: 0, lastSeen: Date.now(),
+      v: 3, clockPool: 3600, perfectSeen: {}, lore: {}, trophies: {}, maxDepth: {}, towerBest: 0, duelsWon: 0, fame: 0, ascensions: 0, daoMarks: 0, dao: {}, karma: 0, karmaUps: {}, feats: {}, best: 0, lastSeen: Date.now(),
       settings: { autoStage: false, autoTech: false, autoMajor: false, autoMission: false, autoEquip: false, autoSkills: true, autoGuard: true },
       stats: { clicks: 0, kills: 0, pills: 0, lives: 1, tribs: 0, breakthroughs: 0, deviations: 0, bestRoot: 0, bestRarity: 0,
-        bestRank: 0, supreme: 0, draws: 0, encounters: 0, deaths: 0, items: 0, playSeconds: 0, parries: 0, defeats: 0, bestStreak: 0, bestPlus: 0 },
+        bestRank: 0, supreme: 0, draws: 0, encounters: 0, deaths: 0, items: 0, playSeconds: 0, bestComprehension: 0, bestCondition: 0, bestPillGrade: 0, bestSite: 0, bestSkillRank: 0, bestBeastStage: 0, secludedSeconds: 0, parries: 0, defeats: 0, bestStreak: 0, bestPlus: 0 },
       log: [], fx: [],
     };
   }
@@ -68,6 +109,7 @@
       region: 0, depth: 0, hunting: false, foe: null, fight: null, hp: 0, recover: 0, swing: 0, strikeCd: 0,
       momentum: 0, streak: 0, guard: 0, cds: {}, miXp: 0, bossMeter: 0, doubleLoot: false, parryBonus: false,
       meridians: 0, abode: {}, eggs: 0, beast: null,
+      cores: 0, techQ: {}, pillGrades: {}, meridianQ: [], abodeSite: 2, skillUse: {},
       encounter: null, encounterIn: rand(30, 60), lastFortune: null,
       dead: false, ascendReady: false, itemSeq: S.itemSeq || 1, choosingRoot: true, rerolls: 0,
     };
@@ -76,6 +118,8 @@
     Object.assign(S, lifeDefaults());
     S.root = rollRoot();
     noteRoot();
+    S.abodeSite = rollLadder('sites');
+    S.stats.bestSite = Math.max(S.stats.bestSite, S.abodeSite);
     S.hp = stats().hp;
   }
 
@@ -92,6 +136,31 @@
     if (!it) return;
     if (!it.affixes) { it.rarity = OLD_GRADES[it.rarity] || 0; it.affixes = it.affix ? [it.affix] : []; delete it.affix; it.plus = 0; }
   }
+  // Version 2 saves used shorter ladders. Map each old grade to the nearest new one.
+  function migrateLadders() {
+    const map = (v, to) => (v === undefined || v === null ? v : to[v] === undefined ? v : to[v]);
+    const ROOT = [1, 2, 3, 4, 6, 8];
+    if (S.root) S.root.tier = map(S.root.tier, ROOT);
+    S.stats.bestRoot = map(S.stats.bestRoot, ROOT);
+    const COMP = [1, 2, 4, 6, 8];
+    for (const k in S.techQ || {}) S.techQ[k] = map(S.techQ[k], COMP);
+    S.stats.bestComprehension = map(S.stats.bestComprehension, COMP);
+    const PUR = [1, 3, 4, 7];
+    S.meridianQ = (S.meridianQ || []).map((q) => map(q, PUR));
+    const SITE = [0, 2, 5, 7, 9];
+    S.abodeSite = map(S.abodeSite, SITE);
+    S.stats.bestSite = map(S.stats.bestSite, SITE);
+    const PILL = [1, 2, 3, 5];
+    for (const k in S.pillGrades || {}) {
+      const old = S.pillGrades[k];
+      const next = D.PILL_GRADES.map(() => 0);
+      old.forEach((n, i) => { next[map(i, PILL)] += n; });
+      S.pillGrades[k] = next;
+    }
+    S.stats.bestPillGrade = map(S.stats.bestPillGrade, PILL);
+    if (S.sect) for (const m of S.sect.board.concat(S.sect.active)) m.rank = (m.rank || 0) + 1;
+    S.v = 3;
+  }
   function load(saved) {
     S = freshMeta();
     const stats0 = S.stats, settings0 = S.settings;
@@ -105,14 +174,14 @@
       S.foe = null;
       S.v = 2;
     }
+    if (S.v < 3) migrateLadders();
     S.fx = [];
     return S;
   }
 
   // ---------- spirit roots ----------
   function rollRoot() {
-    const luck = mods().luck;
-    const idx = weighted(D.ROOT_TIERS, (t, i) => t.weight * Math.pow(1 + Math.max(luck, -40) * 0.01, i));
+    const idx = rollLadder('root');
     const tier = D.ROOT_TIERS[idx];
     let elements;
     if (tier.variant) {
@@ -122,8 +191,9 @@
       elements = [];
       while (elements.length < tier.count) elements.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
     }
-    return { tier: idx, elements };
+    return { tier: idx, elements, purity: rng() };
   }
+  const rootPurityMult = () => 0.8 + 0.6 * (S.root.purity === undefined ? 0.5 : S.root.purity);
   function noteRoot() { S.stats.bestRoot = Math.max(S.stats.bestRoot, S.root.tier); }
   const rerollCost = () => Math.ceil(2 * Math.pow(1.7, S.rerolls));
   function rerollRoot() {
@@ -160,7 +230,7 @@
     ['Spirit root', (m) => {
       if (!S.root) return;
       const t = D.ROOT_TIERS[S.root.tier];
-      m.qi *= t.mult;
+      m.qi *= t.mult * rootPurityMult();
       for (const e of S.root.elements) {
         const info = elementInfo(e);
         const fx = {};
@@ -194,8 +264,14 @@
       }
       applyFx(m, gearFx, 1);
     }],
-    ['Meridians', (m) => { for (let i = 0; i < (S.meridians || 0); i++) applyFx(m, D.MERIDIANS[i].fx, 1); }],
-    ['Cave abode', (m) => { for (const a of D.ABODE) if (a.fx && S.abode && S.abode[a.id]) applyFx(m, a.fx, S.abode[a.id]); }],
+    ['Meridians', (m) => { for (let i = 0; i < (S.meridians || 0); i++) applyFx(m, D.MERIDIANS[i].fx, purityMult(i)); }],
+    ['Cave abode', (m) => { for (const a of D.ABODE) if (a.fx && S.abode && S.abode[a.id]) applyFx(m, a.fx, S.abode[a.id] * siteMult()); }],
+    ['Perfection', (m) => {
+      const list = perfectionList();
+      for (const p of list) if (p.fx) applyFx(m, p.fx, 1);
+      const f = 1 + 0.01 * list.length;
+      m.qi *= f; m.atk *= f; m.hp *= f; m.stones *= f; m.herbs *= f;
+    }],
     ['Martial Intent', (m) => { const f = 1 + 0.04 * miLevel(); m.atk *= f; m.hp *= f; }],
     ['Boss trophies', (m) => { const f = 1 + P.trophyBonus * Object.keys(S.trophies).length; m.atk *= f; m.hp *= f; }],
     ['Tower of Trials', (m) => { const f = 1 + P.towerBonus * S.towerBest; m.atk *= f; m.hp *= f; }],
@@ -256,7 +332,26 @@
     D.MASTERY.forEach((x, i) => { if (level >= x.level) t = i; });
     return t;
   }
-  const techPower = (t) => techLevel(t.id) * t.power * Math.pow(P.masteryStep, masteryIndex(techLevel(t.id)));
+  const techQuality = (id) => D.COMPREHENSION[S.techQ[id] === undefined ? 2 : S.techQ[id]];
+  const techMaxed = (id) => techLevel(id) >= P.techMax;
+  const techPower = (t) => techLevel(t.id) * t.power * Math.pow(P.masteryStep, masteryIndex(techLevel(t.id))) * techQuality(t.id).mult * (techMaxed(t.id) ? 1.5 : 1);
+  const rollComprehension = () => rollLadder('comprehension');
+  const contemplateCost = (t) => Math.ceil(3 * (1 + Math.floor(t.unlock / SPR)));
+  function contemplate(id) {
+    const t = TECHS.find((x) => x.id === id);
+    const have = S.techQ[id] === undefined ? 2 : S.techQ[id];
+    if (!t || !techLevel(id) || S.cores < contemplateCost(t) || have >= D.COMPREHENSION.length - 1) return false;
+    S.cores -= contemplateCost(t);
+    const r = rollComprehension();
+    if (r > have) {
+      S.techQ[id] = r;
+      S.stats.bestComprehension = Math.max(S.stats.bestComprehension, r);
+      log(`Long contemplation pays off. Your ${t.name} deepens to ${D.COMPREHENSION[r].name}.`, r >= 3 ? 'rare' : 'loot');
+      return { improved: true };
+    }
+    log(`You contemplate the ${t.name} and find nothing new.`, '');
+    return { improved: false };
+  }
   function techCost(t) {
     const f = Math.pow(P.techGrowth, techLevel(t.id));
     const out = {};
@@ -267,10 +362,16 @@
   function pay(cost) { for (const k in cost) S[k] -= cost[k]; }
   function buyTech(id) {
     const t = TECHS.find((x) => x.id === id);
-    if (!t || S.stage < t.unlock) return false;
+    if (!t || S.stage < t.unlock || techMaxed(id)) return false;
     const c = techCost(t);
     if (!canAfford(c)) return false;
     pay(c);
+    if (!techLevel(id)) {
+      S.techQ[id] = rollComprehension();
+      S.stats.bestComprehension = Math.max(S.stats.bestComprehension, S.techQ[id]);
+      const q = D.COMPREHENSION[S.techQ[id]];
+      log(`You study the ${t.name} and reach ${q.name} comprehension.`, S.techQ[id] >= 3 ? 'rare' : '');
+    }
     S.techs[id] = techLevel(id) + 1;
     return true;
   }
@@ -280,7 +381,9 @@
     const early = Math.min(stage, P.stageTaperAt);
     const final = Math.max(0, stage - P.stageFinalAt);
     const late = stage - early - final;
-    return P.stageBase * Math.pow(P.stageGrowth, early) * Math.pow(P.stageGrowthLate, late) * Math.pow(P.stageGrowthFinal, final) * Math.pow(P.heavenCost, S.ascensions);
+    // Each heaven also steepens the climb, so permanent bonuses cannot flatten later heavens.
+    const steep = 1 + P.heavenSteepen * S.ascensions;
+    return P.stageBase * Math.pow(Math.pow(P.stageGrowth, early) * Math.pow(P.stageGrowthLate, late) * Math.pow(P.stageGrowthFinal, final), steep) * Math.pow(P.heavenCost, S.ascensions);
   }
   function qiRate(m) {
     m = m || mods();
@@ -334,7 +437,27 @@
   const stoneUnit = () => regionStats(bestRegion()).stones * mods().stones;
 
   // ---------- breakthrough ----------
-  function canAttempt() { return !S.dead && !S.choosingRoot && !S.ascendReady && S.qi >= stageCost(S.stage); }
+  // Each new realm asks something of the other systems. Trophies last forever; the rest belong to one life.
+  function realmGates() {
+    if (!isMajor(S.stage)) return [];
+    const toAscend = S.stage >= maxStage();
+    const next = toAscend ? D.REALMS.length : realmOf(S.stage + 1);
+    const gates = [];
+    const meridians = toAscend ? D.MERIDIANS.length : Math.min(D.MERIDIANS.length, next * 2);
+    gates.push({ label: `Open ${meridians} meridians`, have: `${S.meridians} of ${meridians}`, met: S.meridians >= meridians, tab: 'cultivate' });
+    if (next >= 2) {
+      const region = Math.min(D.REGIONS.length - 1, next - 2 + 1);
+      const useRegion = Math.min(region, bestRegion());
+      gates.push({ label: `Slay the Lord of ${D.REGIONS[useRegion].name}`, have: S.trophies[`${useRegion}:0`] ? 'done' : 'not yet', met: !!S.trophies[`${useRegion}:0`], tab: 'combat', region: useRegion });
+    }
+    if (next >= 3) {
+      const rank = Math.min(4, Math.floor(next / 3));
+      gates.push({ label: `Reach ${D.SECT_RANKS[rank].name} in a sect`, have: S.sect ? D.SECT_RANKS[S.sect.rank].name : 'no sect', met: !!S.sect && S.sect.rank >= rank, tab: 'sect' });
+    }
+    return gates;
+  }
+  const gatesMet = () => realmGates().every((g) => g.met);
+  function canAttempt() { return !S.dead && !S.choosingRoot && !S.ascendReady && S.qi >= stageCost(S.stage) && gatesMet(); }
 
   function callTribulation(realm, extra) {
     const st = stats();
@@ -423,6 +546,11 @@
   const BOSS_METER = 12;
   const canSummonBoss = () => S.bossMeter >= BOSS_METER && !S.fight && S.recover <= 0;
 
+  function skillRank(id) {
+    let r = 0;
+    D.SKILL_RANKS.forEach((x, i) => { if ((S.skillUse[id] || 0) >= x.use) r = i; });
+    return r;
+  }
   function skillDef(id) {
     if (id === 'sect') return S.sect ? D.SECT_SKILLS[S.sect.id] : null;
     return D.SKILLS.find((x) => x.id === id);
@@ -437,6 +565,8 @@
     if (!def || (id !== 'sect' && S.stage < def.stage) || (S.cds[id] || 0) > 0 || S.recover > 0 || !S.hunting) return false;
     if (def.mult && !S.foe) return false;
     S.cds[id] = def.cd;
+    S.skillUse[id] = (S.skillUse[id] || 0) + 1;
+    S.stats.bestSkillRank = Math.max(S.stats.bestSkillRank, skillRank(id));
     const m = mods();
     const st = stats(m);
     if (def.hurt) S.hp = Math.max(1, S.hp - st.hp * def.hurt);
@@ -447,7 +577,7 @@
     if (def.stun && S.foe) S.foe.stun = Math.max(S.foe.stun, def.stun);
     if (def.mult) {
       const execute = def.exec && S.foe.hp / S.foe.maxHp < 0.3;
-      landBlow(def.exec && execute ? def.exec : def.mult, st, m, def.name);
+      landBlow((def.exec && execute ? def.exec : def.mult) * (1 + 0.25 * skillRank(id)), st, m, def.name);
     }
     return true;
   }
@@ -491,7 +621,9 @@
     const tier = roll < 0.015 + luck * 0.0003 ? 'champion' : roll < 0.1 + luck * 0.001 ? 'elite' : 'normal';
     const scale = { normal: 1, elite: 3, champion: 7 }[tier];
     const prefix = { normal: '', elite: 'Elite ', champion: 'Champion ' }[tier];
-    S.foe = makeFoe(prefix + pick(D.REGIONS[i].foes), tier, r.hp * scale * rand(0.85, 1.15), r.dmg * (1 + (scale - 1) * 0.3) * rand(0.9, 1.1), tier !== 'normal');
+    const affix = tier === 'normal' ? null : pick(D.FOE_AFFIXES);
+    S.foe = makeFoe(`${affix ? `${affix.name} ` : ''}${prefix}${pick(D.REGIONS[i].foes)}`, tier, r.hp * scale * rand(0.85, 1.15) * (affix ? affix.hp : 1), r.dmg * (1 + (scale - 1) * 0.3) * rand(0.9, 1.1) * (affix ? affix.dmg : 1), tier !== 'normal');
+    S.foe.pay = affix ? affix.pay : 1;
   }
   function makeFoe(name, tier, hp, dmg, charges) {
     return { name, tier, hp, maxHp: hp, dmg, stun: 0, charges, chargeIn: charges ? rand(5, 8) : 0, charging: 0 };
@@ -624,9 +756,10 @@
 
   const TIER_REWARD = {
     normal: { stones: 1, herb: 0.22, drop: 0.015, xp: 1, fame: 0, shift: 0 },
-    elite: { stones: 4, herb: 0.8, drop: 0.25, xp: 4, fame: 1, shift: 1 },
-    champion: { stones: 14, herb: 1, drop: 0.8, xp: 14, fame: 5, shift: 3 },
+    elite: { stones: 4, herb: 0.8, drop: 0.25, xp: 4, fame: 1, shift: 1, cores: 1 },
+    champion: { stones: 14, herb: 1, drop: 0.8, xp: 14, fame: 5, shift: 3, cores: 5 },
   };
+  function gainCores(n) { S.cores += n; }
   function foeDefeated(m) {
     const foe = S.foe;
     S.stats.kills++;
@@ -641,7 +774,8 @@
 
     const r = foeStats(S.region, S.depth);
     const tw = TIER_REWARD[foe.tier];
-    S.stones += r.stones * rand(0.8, 1.2) * m.stones * tw.stones * payout;
+    S.stones += r.stones * rand(0.8, 1.2) * m.stones * tw.stones * payout * (foe.pay || 1);
+    if (tw.cores) gainCores(Math.ceil(tw.cores * (S.region + 1) * (1 + S.depth * 0.25) * (foe.pay || 1)));
     S.miXp += tw.xp * (S.region + 1);
     S.bossMeter = Math.min(BOSS_METER, S.bossMeter + (foe.tier === 'normal' ? 1 : 3));
     if (tw.fame) gainFame(tw.fame * (S.region + 1) * (S.depth + 1));
@@ -660,6 +794,7 @@
       S.stones += r.stones * 15 * m.stones * payout;
       S.herbs += Math.ceil(12 * (i + 1) * m.herbs);
       S.miXp += 40 * (i + 1) * (d + 1);
+      gainCores(25 * (i + 1) * (d + 1));
       gainFame(15 * (i + 1) * (d + 1) * (first ? 3 : 1));
       gainItem(i, null, bossGrade(i, d), d + 3);
       if (first) {
@@ -691,6 +826,7 @@
         gainFame(fl);
         if (fl % 10 === 0) {
           gainItem(bestRegion(), null, Math.min(23, 2 + Math.floor(fl / 10)), 3);
+          gainCores(fl);
           log(`Tower floor ${fl} cleared. The treasure chest opens.`, 'rare');
         }
       }
@@ -715,6 +851,42 @@
     return t;
   }
 
+  // ---------- perfection ----------
+  // Maxing something out is worth more than the last level: a reward of its own, and +1% to everything.
+  // Recomputed at most once per game tick: bonus maths asks for it constantly.
+  let perfectionMemo = { at: -1, list: [] };
+  function perfectionList() {
+    if (!S.abode) return [];
+    if (perfectionMemo.at === S.stats.playSeconds && perfectionMemo.S === S) return perfectionMemo.list;
+    perfectionMemo = { at: S.stats.playSeconds, S, list: buildPerfection() };
+    return perfectionMemo.list;
+  }
+  function buildPerfection() {
+    const out = [];
+    for (const t of TECHS) if (techMaxed(t.id)) out.push({ id: `tech:${t.id}`, name: t.name, reward: 'Its power rises 50%, and all of its kind gain 3%', fx: { [t.type]: 0.03 } });
+    for (const a of D.ABODE) if ((S.abode[a.id] || 0) >= a.max) out.push({ id: `abode:${a.id}`, name: a.name, reward: a.maxText, fx: a.maxFx });
+    if ((S.meridians || 0) >= 12) out.push({ id: 'meridian:regular', name: 'Twelve Regular Channels', reward: '+25% Qi', fx: { qi: 0.25 } });
+    if ((S.meridians || 0) >= D.MERIDIANS.length) out.push({ id: 'meridian:all', name: 'Grand Heavenly Circuit', reward: '+50% Qi', fx: { qi: 0.5 } });
+    if (S.sect && (S.sect.manual || 0) >= P.manualMax) out.push({ id: 'manual', name: 'Sect Secret Manual', reward: '+50% Qi', fx: { qi: 0.5 } });
+    if (S.beast && S.beast.level >= beastCap()) out.push({ id: 'beast', name: 'Spirit Beast Bond', reward: 'Companion power doubles', fx: { beast: 1 } });
+    for (const u of D.KARMA_UPS) if ((S.karmaUps[u.id] || 0) >= u.max && u.max > 1) out.push({ id: `karma:${u.id}`, name: u.name, reward: '+1% to everything' });
+    for (const u of D.DAO_UPS) if ((S.dao[u.id] || 0) >= u.max && u.max > 1) out.push({ id: `dao:${u.id}`, name: u.name, reward: '+1% to everything' });
+    for (const slot in S.gear) {
+      const it = S.gear[slot];
+      if (it && (it.plus || 0) >= forgeCap(it)) out.push({ id: `forge:${slot}`, name: `Perfected ${D.GEAR_SLOTS[slot].name}`, reward: 'This artifact gains 50% power' });
+    }
+    return out;
+  }
+  function notePerfection() {
+    for (const p of perfectionList()) {
+      if (!S.perfectSeen[p.id]) {
+        S.perfectSeen[p.id] = 1;
+        log(`Perfected: ${p.name}. ${p.reward}.`, 'rare');
+        emit({ kind: 'perfect', name: p.name });
+      }
+    }
+  }
+
   // ---------- spirit beasts ----------
   function gainEgg() {
     S.eggs++;
@@ -736,30 +908,58 @@
     }
     return true;
   }
-  const beastFeedCost = () => Math.ceil(5 * Math.pow(1.35, S.beast ? S.beast.level : 0) * (bestRegion() + 1));
+  const beastCap = () => (S.beast ? 20 + S.beast.rarity * 5 : 0);
+  const beastFeedCost = () => Math.ceil(5 * Math.pow(1.2, S.beast ? S.beast.level : 0) * (bestRegion() + 1));
+  const beastFeedCores = () => (S.beast && S.beast.level % 5 === 4 ? Math.ceil((S.beast.level + 1) / 5) * 2 : 0);
+  function beastStage() {
+    let t = 0;
+    if (S.beast) D.BEAST_STAGES.forEach((x, i) => { if (S.beast.level >= x.level) t = i; });
+    return t;
+  }
   function feedBeast() {
-    if (!S.beast || S.herbs < beastFeedCost()) return false;
+    if (!S.beast || S.beast.level >= beastCap() || S.herbs < beastFeedCost() || S.cores < beastFeedCores()) return false;
+    const before = beastStage();
+    S.cores -= beastFeedCores();
     S.herbs -= beastFeedCost();
     S.beast.level++;
+    if (beastStage() > before) {
+      S.stats.bestBeastStage = Math.max(S.stats.bestBeastStage, beastStage());
+      log(`Your companion evolves into its ${D.BEAST_STAGES[beastStage()].name} form!`, 'rare');
+    }
     return true;
   }
   const beastLuck = (sect) => Math.min(30, Math.ceil(10 * Math.log10(1 + beastPower(sect) * 20)));
   function beastPower(sect) {
     if (!S.beast) return 0;
     const rar = D.RARITIES[S.beast.rarity];
-    return 0.05 * Math.pow(rar.mult, 0.3) * (1 + S.beast.level * 0.1) * (sect || 1);
+    return 0.05 * Math.pow(rar.mult, 0.3) * (1 + S.beast.level * 0.1) * Math.pow(1.5, beastStage()) * (sect || 1);
   }
 
   // ---------- meridians ----------
   function meridianCost(i) { return stageCost(i * 4) * 1.5; }
+  const meridianCores = (i) => (i < 12 ? 0 : (i - 11) * 4);
+  const purityMult = (i) => D.PURITY[S.meridianQ && S.meridianQ[i] !== undefined ? S.meridianQ[i] : 3].mult;
+  const rollPurity = () => rollLadder('purity');
+  const temperCost = (i) => ({ herbs: Math.ceil(10 * (i + 1) * (bestRegion() + 1)), cores: 1 + Math.floor(i / 4) });
+  function temperMeridian(i) {
+    const c = temperCost(i);
+    const have = S.meridianQ[i] === undefined ? 3 : S.meridianQ[i];
+    if (i >= S.meridians || have >= D.PURITY.length - 1 || !canAfford(c)) return false;
+    pay(c);
+    const r = rollPurity();
+    if (r > have) { S.meridianQ[i] = r; log(`The ${D.MERIDIANS[i].name} is tempered to ${D.PURITY[r].name}.`, r >= 3 ? 'rare' : 'loot'); return { improved: true }; }
+    return { improved: false };
+  }
   function openMeridian() {
     const i = S.meridians;
     if (i >= D.MERIDIANS.length || S.stage < i * 4) return false;
     const c = meridianCost(i);
-    if (S.qi < c) return false;
+    if (S.qi < c || S.cores < meridianCores(i)) return false;
     S.qi -= c;
+    S.cores -= meridianCores(i);
+    S.meridianQ[i] = rollPurity();
     S.meridians++;
-    log(`The ${D.MERIDIANS[i].name} (${D.MERIDIANS[i].zh}) opens. Qi rushes through.`, i >= 12 ? 'rare' : 'story');
+    log(`The ${D.MERIDIANS[i].name} (${D.MERIDIANS[i].zh}) opens, ${D.PURITY[S.meridianQ[i]].name}. Qi rushes through.`, i >= 12 ? 'rare' : 'story');
     return true;
   }
 
@@ -767,17 +967,34 @@
   function abodeCost(a) {
     return a.cost * Math.pow(1.7, S.abode[a.id] || 0) * regionStats(bestRegion()).stones;
   }
+  const siteMult = () => D.SITES[S.abodeSite === undefined ? 2 : S.abodeSite].mult;
+  const abodeCores = (a) => Math.floor((S.abode[a.id] || 0) / 5);
+  const surveyCost = () => regionStats(bestRegion()).stones * 40;
+  function surveySite() {
+    if (S.stones < surveyCost() || S.abodeSite >= D.SITES.length - 1) return false;
+    S.stones -= surveyCost();
+    const r = rollLadder('sites');
+    if (r > S.abodeSite) {
+      S.abodeSite = r;
+      S.stats.bestSite = Math.max(S.stats.bestSite, r);
+      log(`Your surveyors find a better home: ${D.SITES[r].name} (${D.SITES[r].zh}).`, r >= 3 ? 'rare' : 'loot');
+      return { improved: true };
+    }
+    log('The geomancer walks the ridges and shakes their head.', '');
+    return { improved: false };
+  }
   function buildAbode(id) {
     const a = D.ABODE.find((x) => x.id === id);
-    if (!a || (a.max && (S.abode[id] || 0) >= a.max) || S.stones < abodeCost(a)) return false;
+    if (!a || (S.abode[id] || 0) >= a.max || S.stones < abodeCost(a) || S.cores < abodeCores(a)) return false;
     S.stones -= abodeCost(a);
+    S.cores -= abodeCores(a);
     S.abode[id] = (S.abode[id] || 0) + 1;
     return true;
   }
   function tickAbode(dt, m) {
     const g = S.abode.garden || 0, v = S.abode.vein || 0;
-    if (g) S.herbs += D.ABODE[1].herbRate * g * (bestRegion() + 1) * m.herbs * dt;
-    if (v) S.stones += D.ABODE[2].stoneRate * v * regionStats(bestRegion()).stones * m.stones * dt;
+    if (g) S.herbs += D.ABODE[1].herbRate * g * siteMult() * (bestRegion() + 1) * m.herbs * dt;
+    if (v) S.stones += D.ABODE[2].stoneRate * v * siteMult() * regionStats(bestRegion()).stones * m.stones * dt;
   }
 
   // ---------- artifacts ----------
@@ -821,12 +1038,32 @@
       if (a.flat && !a.pct) v = Math.ceil(v);
       affixes.push({ fx: a.fx, label: a.label, v, flat: !!a.flat, pct: !!a.pct });
     }
-    return { id: S.itemSeq++, slot, rarity: rar, power, plus: 0, affixes, region: regionIdx, name: `${pick(D.GEAR_ADJ)} ${pick(def.nouns)}` };
+    const cond = rollLadder('condition', (shift || 0) * 0.3 + rar * 0.1);
+    S.stats.bestCondition = Math.max(S.stats.bestCondition || 0, cond);
+    return { id: S.itemSeq++, slot, rarity: rar, power, plus: 0, roll, cond, affixes, region: regionIdx, name: `${pick(D.GEAR_ADJ)} ${pick(def.nouns)}` };
   }
   function itemValue(it) {
     return Math.ceil(regionStats(it.region).stones * 2 * Math.pow(D.RARITIES[it.rarity].mult, 0.3));
   }
-  const itemPower = (it) => it.power * (1 + 0.2 * (it.plus || 0));
+  const forgeCap = (it) => Math.min(30, 5 + it.rarity);
+  const forgeStep = (it) => (it.slot === 'ring' || it.slot === 'talisman' ? 0.05 : 0.2);
+  const itemPower = (it) => it.power * itemQuality(it).mult * (1 + forgeStep(it) * (it.plus || 0)) * ((it.plus || 0) >= forgeCap(it) ? 1.5 : 1);
+  const itemQuality = (it) => D.CONDITIONS[it.cond === undefined ? 3 : it.cond];
+  const reforgeCost = (it) => Math.ceil(2 * (1 + it.rarity / 3));
+  function reforge(slot) {
+    const it = S.gear[slot];
+    if (!it || S.cores < reforgeCost(it) || (it.cond || 3) >= D.CONDITIONS.length - 1) return false;
+    S.cores -= reforgeCost(it);
+    const r = rollLadder('condition', it.rarity * 0.1);
+    if (r > (it.cond === undefined ? 3 : it.cond)) {
+      it.cond = r;
+      S.stats.bestCondition = Math.max(S.stats.bestCondition, r);
+      log(`Reforged: ${it.name} is now ${D.CONDITIONS[r].name}.`, r >= 7 ? 'rare' : 'loot');
+      return { improved: true };
+    }
+    return { improved: false };
+  }
+  const forgeCores = (it) => Math.ceil((1 + (it.plus || 0)) * (1 + it.rarity / 4));
   function itemScore(it) {
     if (!it) return -1;
     const base = it.slot === 'ring' || it.slot === 'talisman' ? itemPower(it) * 100 : itemPower(it);
@@ -836,8 +1073,9 @@
   function forgeChance(it) { return Math.max(0.2, 1 - 0.05 * (it.plus || 0)); }
   function forge(slot) {
     const it = S.gear[slot];
-    if (!it || S.stones < forgeCost(it)) return false;
+    if (!it || it.plus >= forgeCap(it) || S.stones < forgeCost(it) || S.cores < forgeCores(it)) return false;
     S.stones -= forgeCost(it);
+    S.cores -= forgeCores(it);
     if (rng() < forgeChance(it)) {
       it.plus = (it.plus || 0) + 1;
       S.stats.bestPlus = Math.max(S.stats.bestPlus, it.plus);
@@ -901,7 +1139,7 @@
   // ---------- alchemy ----------
   const alchLevel = () => Math.floor(Math.sqrt(S.alchXp / 5));
   const pillScale = (p) => Math.pow(1.22, Math.max(0, S.stage - p.stage));
-  function pillCost(p) { return { herbs: Math.ceil(p.herbs * Math.min(pillScale(p), 40)), stones: p.stones * Math.pow(1.3, S.stage) }; }
+  function pillCost(p) { return { herbs: Math.ceil(p.herbs * Math.min(pillScale(p), 40)), stones: p.stones * Math.pow(1.3, S.stage), cores: p.cores * (1 + realmOf(S.stage)) }; }
   function pillChance(p, m) {
     m = m || mods();
     return Math.min(0.98, p.chance + m.alch + alchLevel() * 0.01);
@@ -920,6 +1158,10 @@
     const perfect = rng() < 0.08 + Math.max(0, mods().luck) * 0.002;
     const n = perfect ? 2 : 1;
     S.pills[id] = (S.pills[id] || 0) + n;
+    const grade = rollLadder('pills', alchLevel() * 0.05);
+    S.pillGrades[id] = S.pillGrades[id] || D.PILL_GRADES.map(() => 0);
+    S.pillGrades[id][grade] += n;
+    S.stats.bestPillGrade = Math.max(S.stats.bestPillGrade, grade);
     S.stats.pills += n;
     log(perfect ? `Pill clouds gather! Two perfect ${p.name}s.` : `Refined a ${p.name}.`, perfect ? 'rare' : 'loot');
     return { ok: true, n };
@@ -928,20 +1170,29 @@
     S.buffs = S.buffs.filter((b) => b.id !== id);
     S.buffs.push({ id, name, t: secs, fx });
   }
+  // Highest grade in stock, or -1 for pills that came ungraded from the sect treasury.
+  function bestPillGrade(id) {
+    const stock = S.pillGrades[id] || [];
+    for (let i = stock.length - 1; i >= 0; i--) if (stock[i] > 0) return i;
+    return -1;
+  }
   function usePill(id) {
     if (!S.pills[id]) return false;
     const m = mods();
-    if (id === 'gather') { const b = D.ENCOUNTER_BUFFS.gather; addBuff('gather', b.name, b.secs, b.fx); }
+    const best = bestPillGrade(id);
+    const q = D.PILL_GRADES[best < 0 ? 0 : best].mult;
+    if (id === 'gather') { const b = D.ENCOUNTER_BUFFS.gather; addBuff('gather', b.name, b.secs * q, b.fx); }
     else if (id === 'heal') { S.injury = 0; S.hp = stats().hp; S.recover = 0; }
-    else if (id === 'foundation') { if (S.btBonus >= 0.36 - 1e-9) return false; S.btBonus += 0.12; }
-    else if (id === 'insight') { S.qi += qiRate(m) * 180; }
-    else if (id === 'longevity') { if (S.longevityUsed >= 8) return false; S.longevityUsed++; S.bonusYears += 15; }
+    else if (id === 'foundation') { if (S.btBonus >= 0.36 - 1e-9) return false; S.btBonus = Math.min(0.36, S.btBonus + 0.12 * q); }
+    else if (id === 'insight') { S.qi += qiRate(m) * 180 * q; }
+    else if (id === 'longevity') { if (S.longevityUsed >= 8) return false; S.longevityUsed++; S.bonusYears += 15 * q; }
     else if (id === 'marrow') {
       const r = rollRoot();
-      if (r.tier > S.root.tier) { S.root = r; noteRoot(); log(`Impurities pour from your skin. You awaken a ${rootName(r)}!`, 'rare'); }
+      if (r.tier > S.root.tier || (r.tier === S.root.tier && r.purity > S.root.purity)) { S.root = r; noteRoot(); log(`Impurities pour from your skin. You awaken a ${rootName(r)}!`, 'rare'); }
       else log('Your marrow burns clean, but your root does not change.', '');
     }
     S.pills[id]--;
+    if (best >= 0) S.pillGrades[id][best]--;
     return true;
   }
 
@@ -963,18 +1214,22 @@
     return true;
   }
   const missionScale = () => Math.pow(1.13, S.stage);
+  function rollMissionRank() {
+    return rollLadder('missions', S.sect.rank * 0.4);
+  }
   function refreshBoard() {
     const pool = D.MISSIONS.slice();
     S.sect.board = [];
     for (let i = 0; i < 3; i++) {
       const tpl = pool.splice(Math.floor(rng() * pool.length), 1)[0];
-      S.sect.board.push({ id: S.itemSeq++, tpl: D.MISSIONS.indexOf(tpl), scale: missionScale() });
+      S.sect.board.push({ id: S.itemSeq++, tpl: D.MISSIONS.indexOf(tpl), scale: missionScale(), rank: rollMissionRank() });
     }
   }
   const missionSlots = () => (S.sect ? 1 + (S.sect.rank >= 2 ? 1 : 0) + (S.sect.rank >= 4 ? 1 : 0) : 0);
-  function missionChance(tpl, m) {
+  function missionChance(tpl, m, rank) {
     m = m || mods();
-    return Math.min(0.99, tpl.chance + Math.max(-30, m.luck) * 0.003);
+    const shift = rank === undefined ? 0 : D.MISSION_RANKS[rank].chance;
+    return Math.min(0.99, tpl.chance + shift + Math.max(-30, m.luck) * 0.003);
   }
   function startMission(id) {
     if (!S.sect || S.sect.active.length >= missionSlots()) return false;
@@ -982,19 +1237,21 @@
     if (i < 0) return false;
     const b = S.sect.board.splice(i, 1)[0];
     const tpl = D.MISSIONS[b.tpl];
-    S.sect.active.push({ tpl: b.tpl, scale: b.scale, t: tpl.dur, dur: tpl.dur });
+    S.sect.active.push({ tpl: b.tpl, scale: b.scale, rank: b.rank || 0, t: tpl.dur, dur: tpl.dur });
     return true;
   }
   function finishMission(a, m) {
     const tpl = D.MISSIONS[a.tpl];
-    if (rng() >= missionChance(tpl, m)) {
+    const rank = D.MISSION_RANKS[a.rank || 0];
+    if (rng() >= missionChance(tpl, m, a.rank || 0)) {
       log(`Mission failed: ${tpl.name}.`, 'bad');
       return;
     }
-    const c = tpl.reward.contribution * 5 * a.scale;
+    const c = tpl.reward.contribution * 5 * a.scale * rank.mult;
+    if (rank.cores) gainCores(rank.cores * (bestRegion() + 1));
     S.sect.contribution += c;
     S.sect.earned += c;
-    if (tpl.reward.stones) S.stones += tpl.reward.stones * stoneUnit();
+    if (tpl.reward.stones) S.stones += tpl.reward.stones * rank.mult * stoneUnit();
     if (tpl.reward.herbs) S.herbs += Math.ceil(tpl.reward.herbs * (bestRegion() + 1) * m.herbs);
     if (tpl.reward.item && rng() < tpl.reward.item) gainItem(bestRegion());
     log(`Mission complete: ${tpl.name}.`, 'loot');
@@ -1009,6 +1266,16 @@
       S.stats.bestRank = Math.max(S.stats.bestRank, r);
       log(`The sect names you ${D.SECT_RANKS[r].name} (${D.SECT_RANKS[r].zh}).`, 'rare');
     }
+  }
+  const donationSize = () => 5 * (bestRegion() + 1);
+  const donationReward = () => 60 * missionScale();
+  function donateCores() {
+    if (!S.sect || S.cores < donationSize()) return false;
+    S.cores -= donationSize();
+    S.sect.contribution += donationReward();
+    S.sect.earned += donationReward();
+    updateRank();
+    return true;
   }
   const treasury = () => {
     const s = missionScale();
@@ -1025,7 +1292,7 @@
     const it = treasury().find((x) => x.id === id);
     if (!it || S.sect.contribution < it.cost || S.sect.rank < (it.unlockRank || 0)) return false;
     S.sect.contribution -= it.cost;
-    if (id === 'manual') S.sect.manual++;
+    if (id === 'manual') { if (S.sect.manual >= P.manualMax) { S.sect.contribution += it.cost; return false; } S.sect.manual++; }
     else if (id === 'pill_foundation') S.pills.foundation = (S.pills.foundation || 0) + 1;
     else if (id === 'pill_longevity') S.pills.longevity = (S.pills.longevity || 0) + 1;
     else if (id === 'artifact') gainItem(bestRegion(), null, 2);
@@ -1043,7 +1310,7 @@
     S.sect.active = S.sect.active.filter((a) => a.t > 0);
     done.forEach((a) => finishMission(a, m));
     if (S.settings.autoMission && S.sect.active.length < missionSlots() && S.sect.board.length) {
-      const b = S.sect.board.slice().sort((x, y) => D.MISSIONS[y.tpl].chance - D.MISSIONS[x.tpl].chance)[0];
+      const b = S.sect.board.slice().sort((x, y) => (y.rank || 0) - (x.rank || 0))[0];
       startMission(b.id);
     }
   }
@@ -1182,7 +1449,7 @@
   }
 
   function autoStudy() {
-    const open = TECHS.filter((t) => S.stage >= t.unlock);
+    const open = TECHS.filter((t) => S.stage >= t.unlock && !techMaxed(t.id));
     for (const t of open.slice().sort((a, b) => techCost(a).stones - techCost(b).stones)) {
       const c = techCost(t);
       if (!c.qi && canAfford(c)) buyTech(t.id);
@@ -1208,6 +1475,7 @@
     if (S.settings.autoTech && S.karmaUps.autoTech) autoStudy();
     if (S.settings.autoStage && S.karmaUps.autoStage && !isMajor(S.stage)) while (!isMajor(S.stage) && canAttempt()) attemptBreakthrough();
     if (S.settings.autoMajor && S.dao.autoMajor && isMajor(S.stage) && !S.ascendReady && canAttempt() && S.injury <= 0) attemptBreakthrough();
+    notePerfection();
     checkFeats();
     if (S.age >= lifespan(m) && !S.ascendReady) {
       S.dead = true;
@@ -1217,22 +1485,94 @@
     }
   }
 
-  // Time away grants a share of income but does not age you.
+  // ---------- seclusion: time away ----------
+  // Time away pays a share of active income and does not age you. It also pays out what the
+  // abode, sect and hunt would have produced, and long absences can turn up finds.
+  function offlineRate() {
+    return Math.min(P.offlineRateMax, P.offlineRate + P.offlineRatePerChamber * (S.abode.chamber || 0) + P.offlineRatePerDao * (S.dao.stillness || 0));
+  }
+  function offlineCapHours() {
+    return Math.min(P.offlineCapMax, P.offlineCapHours + P.offlineCapPerChamber * (S.abode.chamber || 0) + P.offlineCapPerDao * (S.dao.stillness || 0));
+  }
+  const insightSeconds = (secs) => (secs < P.insightMinSecs ? 0 : Math.min(P.insightMaxSecs, secs * 0.1));
+  // Works out how much absence to pay for. A device clock can be set to anything, so only
+  // time confirmed by the server counts in full. Unconfirmed time draws on a small pool
+  // that refills only when the server next confirms the time.
+  function resolveAway({ lastSeen, trustedNow, deviceNow, pool }) {
+    const max = P.unverifiedHours * 3600;
+    if (trustedNow !== null && trustedNow !== undefined) {
+      return { seconds: Math.max(0, (trustedNow - lastSeen) / 1000), verified: true, pool: max };
+    }
+    const seconds = Math.min(Math.max(0, (deviceNow - lastSeen) / 1000), Math.max(0, pool));
+    return { seconds, verified: false, pool: Math.max(0, pool) - seconds };
+  }
+  function huntOutlook(m) {
+    const st = stats(m);
+    const r = foeStats(S.region, S.depth);
+    const hits = Math.ceil(r.hp / st.atk);
+    if (!S.hunting || r.dmg * hits >= st.hp) return null;
+    return { killsPerSec: 1 / (hits + 1), r };
+  }
   function applyOffline(seconds) {
     if (!S || S.dead || S.choosingRoot) return null;
-    const secs = Math.min(seconds, P.offlineCapHours * 3600);
+    const secs = Math.min(seconds, offlineCapHours() * 3600);
     if (secs < 30) return null;
-    const m = mods();
-    const qi = qiRate(m) * secs * P.offlineRate;
-    let stones = 0;
-    if (S.hunting && S.recover <= 0) stones = regionStats(S.region).stones * m.stones * secs * P.offlineRate * 0.25;
-    if (S.sect) stones += 0.05 * (1 + S.sect.rank) * regionStats(bestRegion()).stones * m.stones * secs * P.offlineRate;
-    S.qi += qi;
-    S.stones += stones;
+    S.fight = null;
+    S.foe = null;
+    S.recover = 0;
     S.buffs = [];
     S.injury = 0;
-    log(`You return from ${Math.round(secs / 60)} minutes of seclusion.`, 'story');
-    return { secs, qi, stones };
+    const m = mods();
+    const rate = offlineRate();
+    const rep = { away: seconds, secs, rate, qi: qiRate(m) * secs * rate, stones: 0, herbs: 0, xp: 0, kills: 0, missions: 0, contribution: 0, finds: [], insight: 0 };
+    S.qi += rep.qi;
+
+    const hunt = huntOutlook(m);
+    if (hunt) {
+      rep.kills = Math.floor(hunt.killsPerSec * secs * rate);
+      rep.stones += rep.kills * hunt.r.stones * m.stones;
+      rep.herbs += rep.kills * 0.22 * 2 * (S.region + 1) * m.herbs;
+      rep.xp = rep.kills * (S.region + 1);
+      rep.cores = Math.floor(rep.kills * 0.1 * (S.region + 1));
+      S.cores += rep.cores;
+      S.miXp += rep.xp;
+      S.stats.kills += rep.kills;
+    }
+    const unit = regionStats(bestRegion()).stones;
+    rep.stones += (S.abode.vein || 0) * siteMult() * D.ABODE[2].stoneRate * unit * m.stones * secs * rate;
+    rep.herbs += (S.abode.garden || 0) * siteMult() * D.ABODE[1].herbRate * (bestRegion() + 1) * m.herbs * secs * rate;
+
+    if (S.sect) {
+      rep.stones += 0.05 * (1 + S.sect.rank) * unit * m.stones * secs * rate;
+      const before = S.sect.earned;
+      for (const a of S.sect.active) a.t -= secs * m.mission;
+      const done = S.sect.active.filter((a) => a.t <= 0);
+      S.sect.active = S.sect.active.filter((a) => a.t > 0);
+      done.forEach((a) => finishMission(a, m));
+      rep.missions = done.length;
+      rep.contribution = S.sect.earned - before;
+    }
+    S.stones += rep.stones;
+    S.herbs += rep.herbs;
+
+    // One chance per hour away at something found while wandering, up to a limit.
+    const rolls = Math.min(P.offlineFindsMax, Math.floor(secs / 3600));
+    const luckBoost = 1 + Math.max(0, m.luck) * 0.005;
+    for (let i = 0; i < rolls; i++) {
+      if (rng() < P.offlineFindItem * luckBoost) {
+        const it = gainItem(bestRegion());
+        rep.finds.push(`${D.RARITIES[it.rarity].name}-grade ${it.name}`);
+      } else if (rng() < P.offlineFindEgg * luckBoost) {
+        gainEgg();
+        rep.finds.push('A spirit beast egg');
+      }
+    }
+
+    rep.insight = insightSeconds(secs);
+    if (rep.insight) addBuff('seclusion', 'Seclusion Insight', rep.insight, { qi: P.insightQi });
+    S.stats.secludedSeconds += secs;
+    log(`You return from ${secs >= 3600 ? `${(secs / 3600).toFixed(1)} hours` : `${Math.round(secs / 60)} minutes`} of seclusion.`, 'story');
+    return rep;
   }
 
   // Numbers shown as "1.2K", then scientific once the suffixes run out.
@@ -1252,7 +1592,7 @@
     P, TECHS, maxStage, BAG_SIZE, sectJoinStage, TRIB_FROM_REALM,
     get S() { return S; },
     setRng(f) { rng = f; },
-    newGame, load, tick, applyOffline, fmt,
+    newGame, load, tick, applyOffline, offlineRate, offlineCapHours, insightSeconds, huntOutlook, fmt,
     realmOf, stageInRealm, isMajor, stageCost, qiRate, clickGain, stats, mods, lifespan, btChance, canAttempt,
     attemptBreakthrough, circulate, techLevel, techCost, canAfford, buyTech,
     rootName, elementInfo, rerollRoot, rerollCost, confirmRoot,
@@ -1260,7 +1600,10 @@
     pillCost, pillChance, refine, usePill, alchLevel,
     joinSect, leaveSect, startMission, missionSlots, missionChance, treasury, buyTreasury,
     divine, divineCost, choiceCost, canChoose, chooseEncounter,
-    fateLuck, gradeCurve, rollRarity, modSources, beastLuck,
+    ladderCurve, ladderOdds, rollLadder, reforge, reforgeCost,
+    fateLuck, gradeCurve, rollRarity, modSources, beastLuck, resolveAway, realmGates, gatesMet, perfectionList, rootPurityMult,
+    bestPillGrade, techQuality, techMaxed, contemplate, contemplateCost, meridianCores, purityMult, temperCost, temperMeridian, siteMult, abodeCores, surveyCost, surveySite,
+    forgeCap, forgeCores, itemQuality, beastCap, beastStage, beastFeedCores, donateCores, donationSize, donationReward, skillRank,
     foeStats, miLevel, BOSS_METER, canSummonBoss, skillDef, skillList, useSkill, strike, summonBoss, enterTower, challengeRival, rivalStage, setDepth, titleIndex,
     hatchEgg, feedBeast, beastFeedCost, beastPower, meridianCost, openMeridian, abodeCost, buildAbode, forge, forgeCost, forgeChance, itemPower, masteryIndex, techPower,
     reincarnate, karmaOnDeath, karmaCost, buyKarma, daoCost, buyDao, daoOnAscend, ascend,
