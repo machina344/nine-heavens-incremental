@@ -30,6 +30,7 @@
   };
   const TAB_LABEL = Object.fromEntries(TABS);
   let tab = 'cultivate';
+  let lastKill = null;     // The foe just defeated, shown at 0% for a moment so kills are visible.
   let seclusion = null;   // Report shown after a long absence.
   let trib = null;        // Tribulation currently playing: { ev, shown, done }
   let confirmWipe = false;
@@ -329,7 +330,9 @@
       const foe = S.foe;
       const f = S.fight;
       let card;
+      const showKill = lastKill && performance.now() < lastKill.until;
       if (S.recover > 0) card = `<div class="dim">Recovering for ${Math.ceil(S.recover)}s.</div>`;
+      else if (showKill) card = `<div class="kv"><b>${esc(lastKill.name)}</b><span class="chip">defeated</span></div><div class="kv small"><span class="dim">&nbsp;</span><span>0 / ${fmt(lastKill.maxHp)}</span></div>${bar(0, 'hp')}<div class="small">&nbsp;</div>`;
       else if (foe) {
         const warn = foe.charging > 0 ? `<div class="charge">Charging a killing blow: ${foe.charging.toFixed(1)}s. Guard now!</div>` : foe.stun > 0 ? `<div class="good small">Stunned ${foe.stun.toFixed(1)}s</div>` : '<div class="small">&nbsp;</div>';
         const tag = { elite: 'chip gold', champion: 'chip warn', boss: 'chip warn', duel: 'chip warn', tower: 'chip gold' }[foe.tier];
@@ -779,6 +782,7 @@
       if (ev.kind === 'realm') burst(120);
       if (ev.kind === 'deviation') toast('Qi deviation! Injured.');
       if (ev.kind === 'hit') floatHit(ev.crit ? `${fmt(ev.dmg)}!` : fmt(ev.dmg), ev.crit ? 'crit' : '');
+      if (ev.kind === 'kill') lastKill = { name: ev.name, maxHp: ev.maxHp, until: performance.now() + 600 };
       if (ev.kind === 'parry') floatHit('PARRY', 'parry');
       if (ev.kind === 'smash') floatHit('SMASHED', 'smash');
       if (ev.kind === 'trophy') toast(`Trophy: ${ev.name}`);
@@ -1172,6 +1176,7 @@
     requestAnimationFrame(frame);
   }
 
+  $('version').textContent = `Path of Nine Heavens v${WD.VERSION}`;
   boot();
   render();
   settleAbsence();

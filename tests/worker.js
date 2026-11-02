@@ -1,6 +1,6 @@
 // Runs long bot simulations off the page's main thread. Post { seed, maxSeconds, stopAfterAscensions, P }.
 self.window = self;
-importScripts('../js/data.js', '../js/core.js', 'bot.js');
+importScripts('../js/version.js', '../js/data.js', '../js/core.js', 'bot.js');
 
 self.onmessage = (e) => {
   const opts = e.data;

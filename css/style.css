@@ -194,6 +194,8 @@ select:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 button.link { background: transparent; border: 0; color: var(--celadon); padding: 2px 0; font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
 button.link:hover:not([disabled]) { background: transparent; color: var(--gold); }
 
+.version { max-width: 1500px; margin: 24px auto 0; text-align: center; color: var(--muted); font: .78rem/1.4 var(--font-label); letter-spacing: .04em; }
+
 .tip { position: fixed; z-index: 50; max-width: min(320px, calc(100vw - 16px)); background: #0a1413; border: 1px solid var(--gold); color: var(--paper); padding: 8px 10px; font-size: .86rem; line-height: 1.35; display: flex; flex-direction: column; gap: 3px; pointer-events: none; box-shadow: 0 6px 18px #0009; }
 .tip b { color: var(--gold); font: 700 .95rem/1.2 var(--font-label); }
 .tip i { color: var(--celadon); display: block; margin-top: 3px; }

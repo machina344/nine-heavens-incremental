@@ -58,6 +58,16 @@ Then visit http://localhost:8123.
 | `css/style.css` | Styling |
 | `tests/` | Autoplay bot for checking pacing |
 
+## Versioning
+
+The version number appears at the bottom of every page. It lives in `js/version.js` and only goes up. Bump it with every change you publish:
+
+```bash
+python tools/bump_version.py patch
+```
+
+Use `minor` for new features or `major` for big changes. The script also updates the `?v=` stamps on script and style links, so browsers load matching files after an update.
+
 ## Check the pacing
 
 Serve the folder and open `/tests/index.html`. A bot plays three seeded runs through the real rules with no saves touched, then prints when it reached each realm and ascended. It also reports any invalid numbers. In the latest run (one seed, playing nonstop), it reached its ninth ascension in about 125 hours. The bot uses every skill on cooldown, so real players will take longer. `tests/worker.js` runs longer simulations off the main thread.

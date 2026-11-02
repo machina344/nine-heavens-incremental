@@ -16,7 +16,7 @@
     fightTechPower: 2, fightTechStep: 14, fightTechCost: 15, fightTechCostStep: 60,
     enemyHp: 14, enemyHpStep: 9, enemyDmg: 1.5, enemyDmgStep: 7, enemyStones: 3, enemyStoneStep: 6,
     atkStage: 1.07, hpStage: 1.07,
-    techMax: 100, manualMax: 25, unverifiedHours: 1,
+    techMax: 100, manualMax: 25, battleRegen: 0.003, unverifiedHours: 1,
     offlineRate: 0.3, offlineCapHours: 8, offlineRateMax: 0.6, offlineCapMax: 24,
     offlineRatePerChamber: 0.01, offlineCapPerChamber: 0.4, offlineRatePerDao: 0.02, offlineCapPerDao: 1,
     offlineFindsMax: 6, offlineFindItem: 0.2, offlineFindEgg: 0.04, insightMinSecs: 1800, insightMaxSecs: 600, insightQi: 0.5,
@@ -713,6 +713,10 @@
 
   function tickCombat(dt, m) {
     const st = stats(m);
+    // When maximum vitality changes, keep the same share of it, so growing stronger never looks like damage.
+    if (S.hpMax > 0 && S.hpMax !== st.hp) S.hp *= st.hp / S.hpMax;
+    S.hpMax = st.hp;
+    if (!(S.hp >= 0)) S.hp = st.hp;
     if (S.hp > st.hp) S.hp = st.hp;
     for (const k in S.cds) { S.cds[k] -= dt; if (S.cds[k] <= 0) delete S.cds[k]; }
     if (S.guard > 0) S.guard = Math.max(0, S.guard - dt);
@@ -727,7 +731,8 @@
       S.momentum = Math.max(0, S.momentum - dt * 5);
       return;
     }
-    S.hp = Math.min(st.hp, S.hp + st.hp * dt * 0.004 * miLevel() / 5);
+    // In battle you recover slowly, and faster as Martial Intent grows.
+    S.hp = Math.min(st.hp, S.hp + st.hp * dt * (P.battleRegen + 0.004 * miLevel() / 5));
     if (S.fight) {
       S.fight.t -= dt;
       if (S.fight.t <= 0) {
@@ -787,6 +792,7 @@
   function gainCores(n) { S.cores += n; }
   function foeDefeated(m) {
     const foe = S.foe;
+    emit({ kind: 'kill', name: foe.name, maxHp: foe.maxHp, tier: foe.tier });
     S.stats.kills++;
     S.streak++;
     S.stats.bestStreak = Math.max(S.stats.bestStreak, S.streak);
