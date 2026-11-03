@@ -792,16 +792,16 @@
     }
   }
 
+  // Each part renders on its own, so one failure cannot blank the whole page.
+  const PARTS = [
+    ['effects', drainFx], ['identity', renderIdentity], ['status', renderStatus], ['encounter', renderEncounter],
+    ['tabs', renderTabs], ['panel', () => { if ($('panel')) morph($('panel'), VIEWS[tab]()); }],
+    ['log', renderLog], ['overlay', renderOverlay], ['tooltip', refreshTip],
+  ];
   function render() {
-    drainFx();
-    renderIdentity();
-    renderStatus();
-    renderEncounter();
-    renderTabs();
-    morph($('panel'), VIEWS[tab]());
-    renderLog();
-    renderOverlay();
-    refreshTip();
+    for (const [name, fn] of PARTS) {
+      try { fn(); } catch (e) { reportError(e, name); }
+    }
   }
 
   // ---------- actions ----------
@@ -951,6 +951,26 @@
     clearTimeout(tipTimer);
     if (t) { showTip(t); tipTimer = setTimeout(hideTip, 3500); } else hideTip();
   });
+
+  // ---------- errors ----------
+  // Shows a visible notice instead of failing silently. Repeats of the same error are shown once.
+  const seenErrors = new Set();
+  function reportError(e, where) {
+    const msg = `${where ? `${where}: ` : ''}${(e && e.message) || e}`;
+    if (seenErrors.has(msg)) return;
+    seenErrors.add(msg);
+    console.error(e);
+    let bar = document.getElementById('errorbar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'errorbar';
+      bar.className = 'errorbar';
+      bar.setAttribute('role', 'alert');
+      document.body.prepend(bar);
+    }
+    bar.innerHTML = `<b>Something went wrong.</b> Try a hard refresh (Ctrl+Shift+R, or Cmd+Shift+R on a Mac). If it keeps happening, report this message: <code>${esc(msg)}</code> (v${esc(WD.VERSION || '?')})`;
+  }
+  window.addEventListener('error', (e) => reportError(e.error || e.message, 'page'));
 
   // ---------- saves ----------
   // Time comes from the web server's Date header, then runs on the page's monotonic clock,
@@ -1176,7 +1196,7 @@
     requestAnimationFrame(frame);
   }
 
-  $('version').textContent = `Path of Nine Heavens v${WD.VERSION}`;
+  if ($('version')) $('version').textContent = `Path of Nine Heavens v${WD.VERSION || ''}`;
   boot();
   render();
   settleAbsence();
