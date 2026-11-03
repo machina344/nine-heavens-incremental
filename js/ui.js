@@ -882,7 +882,10 @@
     if (!b || b.disabled) return;
     const [name, arg, arg2] = b.getAttribute('data-a').split(':');
     if (name === 'pillT') { G.setPillTarget(arg, +arg2); render(); return; }
-    if (ACTIONS[name]) { ACTIONS[name](arg); render(); }
+    if (ACTIONS[name]) {
+      try { ACTIONS[name](arg); } catch (err) { reportError(err, `button ${name}`); }
+      render();
+    }
   });
   document.addEventListener('change', (e) => {
     const k = e.target.getAttribute && e.target.getAttribute('data-t');
@@ -956,7 +959,10 @@
   // Shows a visible notice instead of failing silently. Repeats of the same error are shown once.
   const seenErrors = new Set();
   function reportError(e, where) {
-    const msg = `${where ? `${where}: ` : ''}${(e && e.message) || e}`;
+    // The first stack line inside the game's own files says where it happened.
+    const lines = e && e.stack ? String(e.stack).split(/\r?\n/) : [];
+    const frame = (lines.find((l) => /\/js\/\w+\.js/.test(l)) || '').trim().replace(/\?v=[^:]+/, '').replace(/^at /, '').replace(/https?:\/\/[^ (]*\/js\//, '');
+    const msg = `${where ? `${where}: ` : ''}${(e && e.message) || e}${frame ? ` (${frame})` : ''}`;
     if (seenErrors.has(msg)) return;
     seenErrors.add(msg);
     console.error(e);
@@ -1003,7 +1009,8 @@
     const away = G.resolveAway({ lastSeen: S.lastSeen || Date.now(), trustedNow: trustedNow(), deviceNow: Date.now(), pool: S.clockPool });
     S.clockPool = away.pool;
     S.lastSeen = savedTime();
-    const r = G.applyOffline(away.seconds);
+    let r = null;
+    try { r = G.applyOffline(away.seconds); } catch (e) { reportError(e, 'seclusion'); }
     if (r) { r.unverified = !away.verified; showSeclusion(r); }
     lastTick = performance.now();
     save();
@@ -1184,9 +1191,13 @@
       if (r) showSeclusion(r);
     } else {
       let left = gap;
-      while (left > 0) { const step = Math.min(left, 1); G.tick(step); left -= step; }
+      try {
+        while (left > 0) { const step = Math.min(left, 1); G.tick(step); left -= step; }
+      } catch (e) {
+        reportError(e, 'game tick');
+      }
     }
-    drainFx();
+    try { drainFx(); } catch (e) { reportError(e, 'effects'); }
   }
   let lastFrame = performance.now();
   function frame(t) {

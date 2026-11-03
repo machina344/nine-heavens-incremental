@@ -161,6 +161,87 @@
     if (S.sect) for (const m of S.sect.board.concat(S.sect.active)) m.rank = (m.rank || 0) + 1;
     S.v = 3;
   }
+  // Clamps every grade, tier and index in a save to something that exists, so a value from an
+  // older or mismatched version can never point past the end of a list.
+  function repairSave() {
+    const int = (v, max, fallback) => (v !== null && v !== undefined && v !== '' && Number.isFinite(+v) ? Math.max(0, Math.min(max, Math.round(+v))) : fallback);
+    const last = (list) => list.length - 1;
+    const num = (v, fallback) => (Number.isFinite(+v) ? +v : fallback);
+    if (!S.root || typeof S.root !== 'object') S.root = { tier: 1, elements: ['metal', 'wood', 'water', 'fire', 'earth'], purity: 0.5 };
+    S.root.tier = int(S.root.tier, last(D.ROOT_TIERS), 1);
+    // The elements must suit the tier: a variant root has one variant element, the rest that many ordinary ones.
+    const tier = D.ROOT_TIERS[S.root.tier];
+    const have = Array.isArray(S.root.elements) ? S.root.elements : [];
+    if (tier.variant) {
+      S.root.elements = [D.VARIANTS[have[0]] ? have[0] : Object.keys(D.VARIANTS)[0]];
+    } else {
+      const ordinary = have.filter((e, i) => D.ELEMENTS[e] && have.indexOf(e) === i);
+      for (const e of Object.keys(D.ELEMENTS)) if (ordinary.length < tier.count && !ordinary.includes(e)) ordinary.push(e);
+      S.root.elements = ordinary.slice(0, tier.count);
+    }
+    S.root.purity = Math.max(0, Math.min(1, num(S.root.purity, 0.5)));
+    for (const k of ['qi', 'stones', 'herbs', 'cores', 'karma', 'daoMarks', 'age', 'hp', 'fame']) S[k] = Math.max(0, num(S[k], 0));
+    S.stage = int(S.stage, D.REALMS.length * SPR - 1, 0);
+    S.best = Math.max(S.stage, int(S.best, D.REALMS.length * SPR - 1, 0));
+    S.ascensions = int(S.ascensions, 1000, 0);
+    S.techs = S.techs && typeof S.techs === 'object' ? S.techs : {};
+    for (const k in S.techs) S.techs[k] = int(S.techs[k], P.techMax, 0);
+    S.techQ = S.techQ && typeof S.techQ === 'object' ? S.techQ : {};
+    for (const k in S.techQ) S.techQ[k] = int(S.techQ[k], last(D.COMPREHENSION), 2);
+    S.meridians = int(S.meridians, D.MERIDIANS.length, 0);
+    S.meridianQ = (Array.isArray(S.meridianQ) ? S.meridianQ : []).slice(0, S.meridians).map((q) => int(q, last(D.PURITY), 3));
+    while (S.meridianQ.length < S.meridians) S.meridianQ.push(3);
+    S.abodeSite = int(S.abodeSite, last(D.SITES), 2);
+    S.abode = S.abode && typeof S.abode === 'object' ? S.abode : {};
+    for (const a of D.ABODE) if (S.abode[a.id] !== undefined) S.abode[a.id] = int(S.abode[a.id], a.max, 0);
+    S.pillGrades = S.pillGrades && typeof S.pillGrades === 'object' ? S.pillGrades : {};
+    for (const k in S.pillGrades) {
+      const old = Array.isArray(S.pillGrades[k]) ? S.pillGrades[k] : [];
+      S.pillGrades[k] = D.PILL_GRADES.map((g, i) => Math.max(0, Math.round(num(old[i], 0))));
+    }
+    const fixItem = (it) => {
+      if (!it || typeof it !== 'object' || !D.GEAR_SLOTS[it.slot]) return null;
+      it.rarity = int(it.rarity, last(D.RARITIES), 0);
+      it.region = int(it.region, last(D.REGIONS), 0);
+      if (it.cond !== undefined) it.cond = int(it.cond, last(D.CONDITIONS), 3);
+      it.plus = int(it.plus, Math.min(30, 5 + it.rarity), 0);
+      it.power = Math.max(0, num(it.power, 0));
+      it.affixes = Array.isArray(it.affixes) ? it.affixes.filter((a) => a && Number.isFinite(+a.v)) : [];
+      if (typeof it.name !== 'string') it.name = 'Nameless Artifact';
+      return it;
+    };
+    S.bag = (Array.isArray(S.bag) ? S.bag : []).map(fixItem).filter(Boolean);
+    S.vault = (Array.isArray(S.vault) ? S.vault : []).map(fixItem).filter(Boolean);
+    S.gear = S.gear && typeof S.gear === 'object' ? S.gear : {};
+    for (const slot of Object.keys(D.GEAR_SLOTS)) S.gear[slot] = fixItem(S.gear[slot]) || null;
+    if (S.beast) {
+      if (!D.BEASTS.some((b) => b.id === S.beast.species)) S.beast = null;
+      else { S.beast.rarity = int(S.beast.rarity, last(D.RARITIES), 0); S.beast.level = int(S.beast.level, 200, 0); }
+    }
+    if (S.sect) {
+      if (!D.SECTS.some((x) => x.id === S.sect.id)) S.sect = null;
+      else {
+        S.sect.rank = int(S.sect.rank, last(D.SECT_RANKS), 0);
+        const fixMission = (m) => (m && D.MISSIONS[m.tpl] ? Object.assign(m, { rank: int(m.rank, last(D.MISSION_RANKS), 0) }) : null);
+        S.sect.board = (Array.isArray(S.sect.board) ? S.sect.board : []).map(fixMission).filter(Boolean);
+        S.sect.active = (Array.isArray(S.sect.active) ? S.sect.active : []).map(fixMission).filter(Boolean);
+      }
+    }
+    S.region = int(S.region, last(D.REGIONS), 0);
+    S.depth = int(S.depth, D.MAX_DEPTH, 0);
+    S.buffs = (Array.isArray(S.buffs) ? S.buffs : []).filter((b) => b && b.fx && typeof b.fx === 'object');
+    if (S.encounter && !D.ENCOUNTERS[S.encounter.i]) S.encounter = null;
+    if (S.lastFortune !== null && S.lastFortune !== undefined) S.lastFortune = int(S.lastFortune, last(D.FORTUNES), null);
+    if (S.foe && !(S.foe.maxHp > 0)) S.foe = null;
+    const st = S.stats;
+    st.bestRoot = int(st.bestRoot, last(D.ROOT_TIERS), 0);
+    st.bestRarity = int(st.bestRarity, last(D.RARITIES), 0);
+    st.bestComprehension = int(st.bestComprehension, last(D.COMPREHENSION), 0);
+    st.bestPillGrade = int(st.bestPillGrade, last(D.PILL_GRADES), 0);
+    st.bestSite = int(st.bestSite, last(D.SITES), 0);
+    st.bestCondition = int(st.bestCondition, last(D.CONDITIONS), 0);
+    st.bestRank = int(st.bestRank, last(D.SECT_RANKS), 0);
+  }
   function load(saved) {
     S = freshMeta();
     const stats0 = S.stats, settings0 = S.settings;
@@ -175,6 +256,7 @@
       S.v = 2;
     }
     if (S.v < 3) migrateLadders();
+    repairSave();
     S.fx = [];
     return S;
   }
@@ -211,9 +293,9 @@
     log(`Your root is judged: ${rootName(S.root)}. This life begins.`, 'story');
   }
   function rootName(r) {
-    const t = D.ROOT_TIERS[r.tier];
-    if (t.variant) return `${D.VARIANTS[r.elements[0]].name} ${t.name}`;
-    return t.name;
+    const t = D.ROOT_TIERS[r.tier] || D.ROOT_TIERS[1];
+    const v = t.variant && r.elements && D.VARIANTS[r.elements[0]];
+    return v ? `${v.name} ${t.name}` : t.name;
   }
   function elementInfo(key) { return D.ELEMENTS[key] || D.VARIANTS[key]; }
 
@@ -1790,7 +1872,7 @@
     P, TECHS, maxStage, BAG_SIZE, sectJoinStage, TRIB_FROM_REALM,
     get S() { return S; },
     setRng(f) { rng = f; },
-    newGame, load, tick, applyOffline, offlineRate, offlineCapHours, insightSeconds, huntOutlook, fmt,
+    newGame, load, repairSave, tick, applyOffline, offlineRate, offlineCapHours, insightSeconds, huntOutlook, fmt,
     realmOf, stageInRealm, isMajor, stageCost, qiRate, clickGain, stats, mods, lifespan, btChance, canAttempt,
     attemptBreakthrough, circulate, techLevel, techCost, canAfford, buyTech,
     rootName, elementInfo, rerollRoot, rerollCost, confirmRoot,
